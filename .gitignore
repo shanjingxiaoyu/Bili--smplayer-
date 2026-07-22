@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+release/
+_d/
+_tmp/
+_out/
+_w/
+_w1/
+_d1/
+_*/
+gui_preview.html
+_*.py
+*.spec
