@@ -332,15 +332,6 @@ def validate_sessdata(sessdata: str) -> bool:
         return j.get("code") == 0
     except Exception:
         return False
-        "https://api.bilibili.com/x/web-interface/nav",
-        headers=COMMON_HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    d = resp.json()["data"]["wbi_img"]
-    img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
-    sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
-    return img_key, sub_key
 
 
 def enc_wbi(params: dict, img_key: str, sub_key: str) -> dict:
