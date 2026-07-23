@@ -45,6 +45,13 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+# 强制 UTF-8 编码,避免标题中的特殊字符(如 ®)触发 GBK 编码崩溃
+for _fh in (sys.stdout, sys.stderr):
+    try:
+        _fh.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 # PyInstaller 打包后 __file__ 指向临时目录，改用 sys.executable
 # 配置目录：优先使用 %APPDATA%，确保 exe 放在 Program Files 等受限目录时也有写权限
 if getattr(sys, "frozen", False):
@@ -56,6 +63,7 @@ _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ENV_PATH = _CONFIG_DIR / ".env"
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
 YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})")
+EP_RE = re.compile(r"/ep(\d+)")
 
 
 # =============================================================================
@@ -403,6 +411,20 @@ class App:
                 time.sleep(0.5)
                 continue
 
+            m = EP_RE.search(text)
+            if m:
+                ep_id = m.group(1)
+                vid = f"ep{ep_id}"
+                if vid != last_vid:
+                    last_vid = vid
+                    self._log(f">> 番剧/电影 EP: {ep_id}")
+                    try:
+                        self._play_episode(int(ep_id))
+                    except Exception as e:
+                        self._log(f"  [!] {e}")
+                time.sleep(0.5)
+                continue
+
             time.sleep(0.5)
 
     # ---------- 播放 ----------
@@ -417,6 +439,19 @@ class App:
         vurl, aurl, vd, ad = pick_dolby_streams(dash)
         self._add_history("B站", bvid, title, vd, ad or "普通音频")
         launch_player(self.player_path, vurl, title, audio_url=aurl, sessdata=self.sessdata)
+
+    def _play_episode(self, ep_id: int):
+        from bili_clipboard_dolby import get_playurl, pick_dolby_streams, launch_player, resolve_episode
+        bvid, cid, full_title = resolve_episode(self.session, ep_id)
+        self._log(f"  [+] {full_title} (BV={bvid})")
+        data = get_playurl(self.session, bvid, cid, self.img_key, self.sub_key)
+        dash = data.get("dash")
+        if not dash:
+            self._log("  [!] 无 DASH 数据")
+            return
+        vurl, aurl, vd, ad = pick_dolby_streams(dash)
+        self._add_history("番剧", f"ep{ep_id}", full_title, vd, ad or "普通音频")
+        launch_player(self.player_path, vurl, full_title, audio_url=aurl, sessdata=self.sessdata)
 
     def _play_yt(self, ytid):
         from bili_clipboard_dolby import launch_player

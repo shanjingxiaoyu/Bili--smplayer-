@@ -15,3 +15,10 @@ _*.py
 *.spec
 !bili_yt_player.spec
 .claude/
+
+# Build & release artifacts
+build/
+dist/
+mpv-portable/
+BiliYTPlayer_release/
+BiliYTPlayer_release.*

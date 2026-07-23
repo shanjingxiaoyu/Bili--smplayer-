@@ -50,6 +50,13 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+# 强制 UTF-8 编码,避免标题中的特殊字符(如 ®)触发 GBK 编码崩溃
+for _fh in (sys.stdout, sys.stderr):
+    try:
+        _fh.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 # ============================================================================
 # 0. 自检 & 自动安装依赖
 # ============================================================================
@@ -116,6 +123,9 @@ MIXIN_KEY_ENC_TAB = [
 
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
 YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})")
+EP_RE = re.compile(r"/ep(\d+)")
+SS_RE = re.compile(r"/ss(\d+)")
+BANGUMI_MD_RE = re.compile(r"/md(\d+)")
 
 
 
@@ -199,11 +209,38 @@ def _search_registry_install_path(keyword: str) -> str | None:
 
 
 def find_player():
-    """找 SMPlayer，然后取它自带 mpv（参数原样支持，无 SMPlayer 中间层干扰）。
-       多级探测：固定路径 → PATH → 注册表 → 广搜。
-       返回 mpv.exe 绝对路径，找不到返 None。
+    """多级探测 mpv。优先级: 自带便携版 > 独立安装版 > SMPlayer 自带 > PATH > 注册表 > 广搜。
+       返回 mpv.exe 绝对路径,找不到返 None。
     """
     drives = ["C:", "D:", "E:"]
+
+    # ---- 0. 最高优先: 自带便携版 mpv (开箱即用) ----
+    bundled = _exe_dir / "mpv-portable" / "mpv.exe"
+    if bundled.is_file():
+        return str(bundled)
+
+    # ---- 1. 独立安装的 mpv（最新稳定版） ----
+    # winget 安装路径
+    standalone_mpv_paths = [
+        os.path.join(d + os.sep, "Program Files", "MPV Player", "mpv.exe")
+        for d in drives
+    ] + [
+        os.path.join(d + os.sep, "Program Files (x86)", "MPV Player", "mpv.exe")
+        for d in drives
+    ] + [
+        os.path.join(d + os.sep, "Program Files", "mpv", "mpv.exe")
+        for d in drives
+    ]
+    for p in standalone_mpv_paths:
+        if os.path.isfile(p):
+            return p
+
+    # PATH 中的 mpv（可能是 winget/scoop/choco 安装的）
+    mpv_in_path = which("mpv")
+    if mpv_in_path and os.path.isfile(mpv_in_path):
+        # 确保不是 SMPlayer 目录下的 mpv.com（那是 mplayer 兼容层）
+        if os.path.basename(mpv_in_path).lower() == "mpv.exe":
+            return mpv_in_path
 
     def _mpv_near(sm_path):
         """从 smplayer.exe 路径推导它自带的 mpv.exe"""
@@ -212,7 +249,7 @@ def find_player():
             return mpv_try
         return None
 
-    # ---- 1. 固定路径 ----
+    # ---- 1. SMPlayer 固定路径（备用） ----
     for d in drives:
         for sub in ["Program Files", "Program Files (x86)", "MSplayer"]:
             sm = os.path.join(d + os.sep, sub, "SMPlayer", "smplayer.exe")
@@ -298,6 +335,31 @@ def enc_wbi(params: dict, img_key: str, sub_key: str) -> dict:
 # 5. 视频信息 & playurl 解析
 # ============================================================================
 
+def resolve_episode(session: requests.Session, ep_id: int) -> tuple[str, int, str]:
+    """通过 EP(番剧/电影) ID 获取 bvid, cid, title。
+       返回 (bvid, cid, full_title)。
+    """
+    resp = session.get(
+        "https://api.bilibili.com/pgc/view/web/season",
+        params={"ep_id": ep_id},
+        headers=COMMON_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    j = resp.json()
+    if j.get("code") != 0:
+        raise RuntimeError(f"获取番剧信息失败: {j.get('message')}")
+    result = j["result"]
+    season_title = result.get("season_title", "") or result.get("title", "")
+    for ep in result.get("episodes", []):
+        if ep.get("id") == ep_id:
+            bvid = ep["bvid"]
+            cid = ep["cid"]
+            ep_title = ep.get("long_title") or ep.get("share_copy", "") or f"第{ep.get('title','?')}集"
+            full_title = f"{season_title} - {ep_title}" if season_title else ep_title
+            return bvid, int(cid), full_title
+    raise RuntimeError(f"未找到 EP {ep_id}")
+
 def get_cid(session: requests.Session, bvid: str):
     resp = session.get(
         "https://api.bilibili.com/x/web-interface/view",
@@ -336,46 +398,50 @@ def get_playurl(session: requests.Session, bvid: str, cid: int,
 
 
 def pick_dolby_streams(dash: dict):
-    """提取杜比优先流，找不到则回退最高清普通流。"""
+    """提取视频/音频流。
+       优先普通最高清流(兼容性最好),杜比视界仅作备选(易黑屏)。
+       返回 (video_url, audio_url, vdesc, adesc)。
+    """
     video_url = audio_url = None
     vdesc = adesc = ""
 
     dolby = dash.get("dolby") or {}
 
-    # 杜比视界
-    dv = dolby.get("video")
-    if dv:
-        v = dv[0]
-        video_url = v.get("base_url") or (v.get("backupUrl") or [None])[0]
-        vdesc = "杜比视界(Dolby Vision)"
+    # ── 第一优先: 普通最高清视频(兼容性最好,不会黑屏) ──
+    vids = dash.get("video") or []
+    if vids:
+        best = sorted(vids, key=lambda x: (x.get("id", 0), x.get("bandwidth", 0)))[-1]
+        video_url = best.get("base_url") or (best.get("backup_url") or [None])[0]
+        vdesc = f"普通视频 id={best.get('id')} codec={best.get('codecs', '?')}"
 
-    # 杜比全景声
+    # ── 普通最高码率音频 ──
+    auds = dash.get("audio") or []
+    if auds:
+        best = sorted(auds, key=lambda x: x.get("bandwidth", 0))[-1]
+        audio_url = best.get("base_url") or (best.get("backup_url") or [None])[0]
+        adesc = f"普通音频 id={best.get('id')}"
+
+    # ── FLAC 无损音频(如果可用,覆盖普通音频) ──
+    flac = dash.get("flac") or {}
+    fa = flac.get("audio")
+    if fa:
+        audio_url = fa.get("base_url") or (fa.get("backup_url") or [None])[0]
+        adesc = "FLAC 无损"
+
+    # ── 杜比全景声(如果可用,覆盖 FLAC) ──
     da = dolby.get("audio")
     if da:
         a = da[0]
         audio_url = a.get("base_url") or (a.get("backupUrl") or [None])[0]
         adesc = "杜比全景声(Dolby Atmos/E-AC-3)"
 
-    # 回退：普通最高清视频
-    if not video_url:
-        vids = dash.get("video") or []
-        if vids:
-            best = sorted(vids, key=lambda x: (x.get("id", 0), x.get("bandwidth", 0)))[-1]
-            video_url = best.get("base_url") or (best.get("backup_url") or [None])[0]
-            vdesc = f"普通视频 qn={best.get('id')}"
-
-    # 回退：FLAC / 普通最高码率音频
-    if not audio_url:
-        flac = (dash.get("flac") or {}).get("audio")
-        if flac:
-            audio_url = flac.get("base_url") or (flac.get("backup_url") or [None])[0]
-            adesc = "FLAC 无损"
-        else:
-            auds = dash.get("audio") or []
-            if auds:
-                best = sorted(auds, key=lambda x: x.get("bandwidth", 0))[-1]
-                audio_url = best.get("base_url") or (best.get("backup_url") or [None])[0]
-                adesc = f"普通音频 id={best.get('id')}"
+    # ── 杜比视界仅作为备选(易导致黑屏,不推荐自动使用) ──
+    dv = dolby.get("video")
+    if dv and not video_url:
+        # 只有找不到普通流时才用杜比视界
+        v = dv[0]
+        video_url = v.get("base_url") or (v.get("backupUrl") or [None])[0]
+        vdesc = "杜比视界(Dolby Vision) [兼容性警告]"
 
     return video_url, audio_url, vdesc, adesc
 
@@ -398,7 +464,19 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
     """
     import tempfile
 
-    cmd = [player_path, video_url, f"--force-media-title={title}"]
+    # 基础命令：兼容性优先，避免 HDR 参数导致 SDR 显示器黑屏
+    cmd = [
+        player_path,
+        video_url,
+        f"--force-media-title={title}",
+        "--no-config",              # 跳过 SMPlayer 记忆的 mpv.conf 和每文件设置
+        "--load-scripts=no",        # 跳过外部脚本，避免干扰
+        "--audio-exclusive=no",     # 共享模式，防止独占模式下 E-AC-3 崩溃
+        "--ao=wasapi",              # 显式强制 WASAPI，避免降级到 dsound
+        "--vo=gpu-next",            # 使用 libplacebo 渲染
+        "--gpu-context=d3d11",      # 强制 D3D11 后端，绕过虚拟显示器干扰
+        "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
+    ]
 
     # B 站：CDN 直链，音视频分离 + cookie 鉴权
     if sessdata:
@@ -415,13 +493,21 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
             "--user-agent=" + UA,
         ]
         if audio_url:
-            cmd += [f"--audio-file={audio_url}"]
+            cmd += [
+                f"--audio-file={audio_url}",
+                "--audio-demuxer=lavf",            # 显式用 lavf 解复用 .m4s 音频流
+                "--demuxer-lavf-probescore=100",   # 提高 m4s 格式探测精度
+            ]
 
     # YouTube：Python 预处理 URL，不需要外部 yt-dlp
     # （URL 已由 process_youtube 通过 yt-dlp extract_info 预处理为直链）
 
     print(f"    唤起 mpv: {title}")
-    proc = _popen_silent(cmd, stderr=subprocess.PIPE, text=True)
+    # 启动 mpv: 只需抑制控制台弹窗(CREATE_NO_WINDOW), 不能用 SW_HIDE(会隐藏 mpv 主窗口!)
+    popen_kw = {}
+    if sys.platform == "win32":
+        popen_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, **popen_kw)
 
     # mpv 读入内存后可删 cookie 文件
     if sessdata:
@@ -586,6 +672,34 @@ def main():
                 print(f"\n>> 检测到 YouTube 链接: {ytid}", flush=True)
                 try:
                     process_youtube(player_path, ytid)
+                except Exception as e:
+                    print(f"  [!] 播放失败: {e}", flush=True)
+            time.sleep(0.5)
+            continue
+
+        # ---- 番剧/电影 (EP/SS) ----
+        m = EP_RE.search(text)
+        if m:
+            ep_id = m.group(1)
+            vid_key = f"ep{ep_id}"
+            if vid_key != last_vid:
+                last_vid = vid_key
+                print(f"\n>> 检测到番剧/电影 EP: {ep_id}", flush=True)
+                try:
+                    bvid, cid, full_title = resolve_episode(session, int(ep_id))
+                    print(f"  [+] {full_title} (BV={bvid})", flush=True)
+                    data = get_playurl(session, bvid, cid, img_key, sub_key)
+                    dash = data.get("dash")
+                    if not dash:
+                        print("  [!] 未返回 DASH 数据，跳过。", flush=True)
+                    else:
+                        video_url, audio_url, vdesc, adesc = pick_dolby_streams(dash)
+                        if video_url:
+                            print(f"  [+] 画质: {vdesc}", flush=True)
+                            print(f"  [+] 音轨: {adesc if audio_url else '无'}", flush=True)
+                            launch_player(player_path, video_url, full_title, audio_url=audio_url, sessdata=sessdata)
+                        else:
+                            print("  [!] 未能提取可播放的视频流。", flush=True)
                 except Exception as e:
                     print(f"  [!] 播放失败: {e}", flush=True)
             time.sleep(0.5)
