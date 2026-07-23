@@ -199,29 +199,38 @@ def _search_registry_install_path(keyword: str) -> str | None:
 
 
 def find_player():
-    """只查找 SMPlayer（底层自带 mpv，无需单独安装 mpv）。
+    """找 SMPlayer，然后取它自带 mpv（参数原样支持，无 SMPlayer 中间层干扰）。
        多级探测：固定路径 → PATH → 注册表 → 广搜。
+       返回 mpv.exe 绝对路径，找不到返 None。
     """
     drives = ["C:", "D:", "E:"]
+
+    def _mpv_near(sm_path):
+        """从 smplayer.exe 路径推导它自带的 mpv.exe"""
+        mpv_try = os.path.join(os.path.dirname(sm_path), "mpv", "mpv.exe")
+        if os.path.isfile(mpv_try):
+            return mpv_try
+        return None
 
     # ---- 1. 固定路径 ----
     for d in drives:
         for sub in ["Program Files", "Program Files (x86)", "MSplayer"]:
-            p = os.path.join(d + os.sep, sub, "SMPlayer", "smplayer.exe")
-            if os.path.isfile(p):
-                return p
+            sm = os.path.join(d + os.sep, sub, "SMPlayer", "smplayer.exe")
+            if os.path.isfile(sm):
+                mpv = _mpv_near(sm) or sm  # 没自带 mpv 就回退到 smplayer
+                return mpv
 
     # ---- 2. PATH ----
     p = which("smplayer")
     if p:
-        return p
+        return _mpv_near(p) or p
 
     # ---- 3. 注册表 ----
     loc = _search_registry_install_path("smplayer")
     if loc:
         sm_try = os.path.join(loc, "smplayer.exe")
         if os.path.isfile(sm_try):
-            return sm_try
+            return _mpv_near(sm_try) or sm_try
 
     # ---- 4. 广搜 Program Files ----
     for d in drives:
@@ -230,14 +239,13 @@ def find_player():
             if not os.path.isdir(base):
                 continue
             for root, dirs, _ in os.walk(base):
-                # 限制搜索深度，避免全盘扫描
                 depth = root.replace(base, "").count(os.sep)
                 if depth > 3:
                     dirs.clear()
                     continue
                 sm_try = os.path.join(root, "smplayer.exe")
                 if os.path.isfile(sm_try):
-                    return sm_try
+                    return _mpv_near(sm_try) or sm_try
 
     # ---- 5. .lnk 快捷方式 ----
     for p in [
@@ -245,7 +253,7 @@ def find_player():
         os.path.join(os.path.expanduser("~"), "Desktop", "SMPlayer.lnk"),
     ]:
         if os.path.isfile(p):
-            return p
+            return p  # .lnk 没法推导 mpv，直接返回
 
     return None
 
@@ -385,15 +393,14 @@ def build_http_header_arg(sessdata: str) -> str:
 
 
 def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
-    """唤起 SMPlayer 播放。
-       SMPlayer 将无法识别的参数透传给底层 mpv。
-       Cookie 通过临时文件传入（ffmpeg HTTP 层拒绝 --http-header-fields 里的 Cookie）。
+    """直接唤起 mpv 播放（从 SMPlayer 目录取的自带 mpv）。
+       不走 SMPlayer 中间层，参数原样生效。
     """
     import tempfile
 
     cmd = [player_path, video_url, f"--force-media-title={title}"]
 
-    # B 站：CDN 直链，音视频分离，需要 cookie 鉴权
+    # B 站：CDN 直链，音视频分离 + cookie 鉴权
     if sessdata:
         cookie_fd, cookie_path = tempfile.mkstemp(
             suffix=".txt", prefix="bili_cookies_", text=True
@@ -407,18 +414,16 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
             "--http-header-fields=Referer: " + REFERER,
             "--user-agent=" + UA,
         ]
-        # 独立音轨（SMPlayer 透传给 mpv）
         if audio_url:
             cmd += [f"--audio-file={audio_url}"]
 
-    # YouTube：底层 mpv 通过 yt-dlp 自动解析
-    elif "youtube.com" in video_url or "youtu.be" in video_url:
-        cmd += ["--ytdl-format=bestvideo+bestaudio/best"]
+    # YouTube：Python 预处理 URL，不需要外部 yt-dlp
+    # （URL 已由 process_youtube 通过 yt-dlp extract_info 预处理为直链）
 
-    print(f"    唤起 SMPlayer: {title}")
+    print(f"    唤起 mpv: {title}")
     proc = _popen_silent(cmd, stderr=subprocess.PIPE, text=True)
 
-    # 等播放器拿到流后即可删 cookie 文件（mpv 已读入内存）
+    # mpv 读入内存后可删 cookie 文件
     if sessdata:
         time.sleep(2)
         try:
@@ -426,16 +431,16 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         except OSError:
             pass
 
-    # 快速检查播放器是否秒退
+    # 快速检查 mpv 是否秒退
     time.sleep(0.3)
     code = proc.poll()
     if code is not None and code != 0:
         err = proc.stderr.read()[:500] if proc.stderr else ""
-        print(f"    [!] SMPlayer 异常退出 (code={code})。")
+        print(f"    [!] mpv 异常退出 (code={code})。")
         if err:
             print(f"    [!] {err.strip()}")
     elif code is None:
-        print(f"    [+] SMPlayer 正在播放: {title}")
+        print(f"    [+] mpv 正在播放: {title}")
 
 
 # ============================================================================
@@ -489,11 +494,24 @@ def process_bvid(session, bvid, img_key, sub_key, player_path, sessdata):
 
 
 def process_youtube(player_path, ytid):
-    """YouTube：SMPlayer 底层 mpv + yt-dlp 自动解析最高画质。"""
+    """YouTube：Python yt-dlp 提取直链 → mpv 播放（不依赖外部 yt-dlp）。"""
     url = f"https://www.youtube.com/watch?v={ytid}"
-    print(f"    唤起 SMPlayer (YouTube): {url}")
-    launch_player(player_path, url, url)
-    print(f"    [+] SMPlayer 正在播放: {url}")
+    stream_url = url  # 默认回退到原始 URL
+
+    try:
+        import yt_dlp
+        ydl_opts = {"quiet": True, "no_warnings": True, "format": "best"}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            fmt = info.get("url") or ""
+            if fmt:
+                stream_url = fmt
+    except Exception as e:
+        print(f"    [!] yt-dlp 预处理失败({e})，回退原始 URL。")
+
+    print(f"    唤起 mpv (YouTube): {url}")
+    launch_player(player_path, stream_url, url)
+    print(f"    [+] mpv 正在播放: {url}")
 
 
 # ============================================================================
@@ -517,7 +535,7 @@ def main():
 
     player_path = find_player()
     if not player_path:
-        print("[!] 未检测到 SMPlayer，请先安装。", flush=True)
+        print("[!] 未检测到 SMPlayer/mpv，请先安装 SMPlayer。", flush=True)
         sys.exit(1)
     print(f"[+] 播放器: {player_path}", flush=True)
 

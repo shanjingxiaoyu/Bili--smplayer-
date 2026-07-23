@@ -317,8 +317,8 @@ class App:
         if not player_path:
             self.root.after(0, lambda: self._log("[!] 未找到播放器"))
             player_path = filedialog.askopenfilename(
-                title="请手动选择 smplayer.exe",
-                filetypes=[("SMPlayer", "smplayer.exe"), ("所有文件", "*.*")],
+                title="请手动选择 mpv.exe（通常在 SMPlayer 安装目录的 mpv 子目录下）",
+                filetypes=[("mpv", "mpv.exe"), ("SMPlayer", "smplayer.exe"), ("所有文件", "*.*")],
             )
             if not player_path:
                 self._log("[!] 未选择播放器，功能不可用。")
@@ -421,7 +421,18 @@ class App:
     def _play_yt(self, ytid):
         from bili_clipboard_dolby import launch_player
         url = f"https://www.youtube.com/watch?v={ytid}"
-        launch_player(self.player_path, url, url)
+        stream_url = url
+        try:
+            import yt_dlp
+            ydl_opts = {"quiet": True, "no_warnings": True, "format": "best"}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                fmt = info.get("url") or ""
+                if fmt:
+                    stream_url = fmt
+        except Exception:
+            pass
+        launch_player(self.player_path, stream_url, url)
         self._add_history("YT", ytid, url, "—", "—")
 
     # ---------- 退出 ----------
