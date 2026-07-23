@@ -386,15 +386,15 @@ def build_http_header_arg(sessdata: str) -> str:
 
 def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
     """唤起 SMPlayer 播放。
-       SMPlayer 会将无法识别的参数（--cookies-file, --audio-file 等）透传给底层 mpv。
-       Cookie 必须通过 cookies 文件传入，不可用 --http-header-fields
-       （ffmpeg HTTP 层会拒绝 Cookie/Origin 头，导致 CDN 403）。
+
+       B 站：走 yt-dlp 自动合并音视频（--audio-file 第二个 HTTP 连接缺 cookie 会 403）。
+       YouTube：走 yt-dlp 解析最高画质。
     """
     import tempfile
 
     cmd = [player_path, video_url, f"--force-media-title={title}"]
 
-    # B 站：需要 cookies 鉴权 + 可选独立音轨
+    # B 站：通过 yt-dlp 解析 + 合并音视频（避免独立音频流 cookie 丢失导致无声）
     if sessdata:
         cookie_fd, cookie_path = tempfile.mkstemp(
             suffix=".txt", prefix="bili_cookies_", text=True
@@ -407,16 +407,10 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
             "--cookies-file=" + cookie_path,
             "--http-header-fields=Referer: " + REFERER,
             "--user-agent=" + UA,
-            "--vo=gpu-next",
-            "--ao=wasapi",
-            "--audio-exclusive=yes",
-            "--audio-spdif=eac3",
-            "--target-colorspace-hint=yes",
+            "--ytdl-format=bestvideo+bestaudio/best",
         ]
-        if audio_url:
-            cmd += [f"--audio-file={audio_url}"]
 
-    # YouTube：让底层 mpv 通过 yt-dlp 自动解析最高画质
+    # YouTube：底层 mpv 通过 yt-dlp 自动解析
     elif "youtube.com" in video_url or "youtu.be" in video_url:
         cmd += ["--ytdl-format=bestvideo+bestaudio/best"]
 
@@ -471,25 +465,15 @@ def read_clipboard() -> str:
     return ""
 
 def process_bvid(session, bvid, img_key, sub_key, player_path, sessdata):
+    """B 站：直接传页面 URL 给 SMPlayer，由底层 yt-dlp 自动合并音视频。
+       不再走 CDN 直链 + --audio-file 方案（第二个 HTTP 连接无 cookie 导致无声）。
+    """
     print(f"  [*] 开始解析 {bvid} …")
     cid, title = get_cid(session, bvid)
-    print(f"  [+] 标题: {title}")
+    print(f"  [+] 标题: {title}  (yt-dlp 合并音视频)")
 
-    data = get_playurl(session, bvid, cid, img_key, sub_key)
-    dash = data.get("dash")
-    if not dash:
-        print("  [!] 未返回 DASH 数据，跳过。")
-        return
-
-    video_url, audio_url, vdesc, adesc = pick_dolby_streams(dash)
-    if not video_url:
-        print("  [!] 未能提取可播放的视频流。")
-        return
-
-    print(f"  [+] 画质: {vdesc}")
-    print(f"  [+] 音轨: {adesc if audio_url else '无'}")
-
-    launch_player(player_path, video_url, title, audio_url=audio_url, sessdata=sessdata)
+    url = f"https://www.bilibili.com/video/{bvid}"
+    launch_player(player_path, url, title, sessdata=sessdata)
 
 
 def process_youtube(player_path, ytid):

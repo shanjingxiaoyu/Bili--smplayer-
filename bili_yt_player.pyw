@@ -407,16 +407,11 @@ class App:
 
     # ---------- 播放 ----------
     def _play_bili(self, bvid):
-        from bili_clipboard_dolby import get_cid, get_playurl, pick_dolby_streams, launch_player
+        from bili_clipboard_dolby import get_cid, launch_player
         cid, title = get_cid(self.session, bvid)
-        data = get_playurl(self.session, bvid, cid, self.img_key, self.sub_key)
-        dash = data.get("dash")
-        if not dash:
-            self._log("  [!] 无 DASH 数据")
-            return
-        vurl, aurl, vd, ad = pick_dolby_streams(dash)
-        self._add_history("B站", bvid, title, vd, ad or "普通音频")
-        launch_player(self.player_path, vurl, title, audio_url=aurl, sessdata=self.sessdata)
+        url = f"https://www.bilibili.com/video/{bvid}"
+        self._add_history("B站", bvid, title, "(yt-dlp)", "(合并)")
+        launch_player(self.player_path, url, title, sessdata=self.sessdata)
 
     def _play_yt(self, ytid):
         from bili_clipboard_dolby import launch_player
