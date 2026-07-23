@@ -396,11 +396,6 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         player_path,
         video_url,
         f"--force-media-title={title}",
-        # ---- 音频质素 ----
-        "--ao=wasapi",           # WASAPI 独占模式，绕过 Windows 混音器重采样
-        "--audio-exclusive=yes", # bit-perfect 直出 DAC，Hi-Res 不降级
-        # 注意：不加 --audio-spdif=eac3，让 mpv 软解 E-AC-3 → PCM
-        #       Dolby Access 接收解码后的多声道 PCM 做虚拟全景声
     ]
 
     # B 站：通过 yt-dlp 解析 + 合并音视频（避免独立音频流 cookie 丢失导致无声）
