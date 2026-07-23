@@ -15,6 +15,7 @@ import sys
 import re
 import time
 import json
+import atexit
 import hashlib
 import subprocess
 import urllib.parse
@@ -22,15 +23,24 @@ from functools import reduce
 from pathlib import Path
 from shutil import which
 
+# ---- PyInstaller --windowed 模式下 sys.stdout/stderr 为 None，任何 print() 都会崩溃 ----
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 # ============================================================================
 # 0. 自检 & 自动安装依赖
 # ============================================================================
 
+# 配置目录：优先使用 %APPDATA%，确保 exe 放在 Program Files 等受限目录时也有写权限
 if getattr(sys, "frozen", False):
-    SCRIPT_DIR = Path(sys.executable).resolve().parent
+    _exe_dir = Path(sys.executable).resolve().parent
 else:
-    SCRIPT_DIR = Path(__file__).resolve().parent
-ENV_PATH = SCRIPT_DIR / ".env"
+    _exe_dir = Path(__file__).resolve().parent
+_CONFIG_DIR = Path(os.environ.get("APPDATA", str(_exe_dir))) / "BiliYTPlayer"
+_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+ENV_PATH = _CONFIG_DIR / ".env"
 
 
 def _install(pkg, imp=None):
@@ -49,9 +59,11 @@ def _install(pkg, imp=None):
         print(f"[+] {pkg} 安装完成。")
 
 
-_install("requests")
-_install("python-dotenv", "dotenv")
-_install("pyperclip")
+# PyInstaller 打包后依赖已随 exe bundle，无需（也无法）pip install
+if not getattr(sys, "frozen", False):
+    _install("requests")
+    _install("python-dotenv", "dotenv")
+    _install("pyperclip")
 
 
 import requests                  # noqa: E402
@@ -372,6 +384,9 @@ def launch_mpv(mpv_path, video_url, audio_url, title, sessdata):
         f.write("# Netscape HTTP Cookie File\n")
         f.write(".bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\t" + sessdata + "\n")
 
+    # 注册 atexit 兜底清理，防止程序异常退出时 SESSDATA 残留在 %TEMP%
+    atexit.register(lambda p=cookie_path: os.unlink(p) if os.path.exists(p) else None)
+
     cmd = [
         mpv_path,
         video_url,
@@ -497,8 +512,12 @@ def process_youtube(player_path, kind, ytid):
 
 def main():
     # 无缓冲输出，确保终端实时看到日志
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    # --windowed 模式下 stdout 可能是 devnull 文件，无 reconfigure 方法，忽略即可
+    for _fh in (sys.stdout, sys.stderr):
+        try:
+            _fh.reconfigure(line_buffering=True)
+        except (AttributeError, OSError):
+            pass
 
     print("=" * 56, flush=True)
     print(" B 站 / YouTube 剪贴板直连播放器", flush=True)
