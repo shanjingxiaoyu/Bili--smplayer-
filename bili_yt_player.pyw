@@ -190,6 +190,14 @@ class App:
 
         self._build_ui()
 
+        # 检查 SESSDATA 是否过期,过期则自动清除并触发重填
+        if self.sessdata:
+            from bili_clipboard_dolby import validate_sessdata
+            if not validate_sessdata(self.sessdata):
+                self._log("[!] SESSDATA 已过期,请重新输入。")
+                ENV_PATH.unlink(missing_ok=True)
+                self.sessdata = None
+
         if not self.sessdata:
             # 无 SESSDATA → 浏览器弹 HTML 配置页
             self.sessdata = _web_sessdata_input(ENV_PATH)

@@ -305,6 +305,24 @@ def _mixin_key(orig: str) -> str:
 
 def get_wbi_keys(session: requests.Session):
     resp = session.get(
+
+
+def validate_sessdata(sessdata: str) -> bool:
+    """检查 SESSDATA 是否有效。返回 True=有效, False=过期。"""
+    try:
+        s = requests.Session()
+        s.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
+        r = s.get(
+            "https://api.bilibili.com/x/web-interface/nav",
+            headers=COMMON_HEADERS,
+            timeout=10,
+        )
+        r.raise_for_status()
+        j = r.json()
+        # code=0 表示登录有效, -101 表示未登录/过期
+        return j.get("code") == 0
+    except Exception:
+        return False
         "https://api.bilibili.com/x/web-interface/nav",
         headers=COMMON_HEADERS,
         timeout=10,
@@ -618,6 +636,12 @@ def main():
     print("=" * 56, flush=True)
 
     sessdata = load_sessdata()
+
+    # 检查 SESSDATA 是否有效,过期则清除 .env 并重新询问
+    if not validate_sessdata(sessdata):
+        print("[!] SESSDATA 已过期,请重新输入。", flush=True)
+        ENV_PATH.unlink(missing_ok=True)
+        sessdata = load_sessdata()
 
     player_path = find_player()
     if not player_path:
