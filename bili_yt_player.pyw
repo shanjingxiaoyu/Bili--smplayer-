@@ -313,21 +313,19 @@ class App:
         from bili_clipboard_dolby import find_player, get_wbi_keys
         import requests
 
-        player_path, kind = find_player()
+        player_path = find_player()
         if not player_path:
             self.root.after(0, lambda: self._log("[!] 未找到播放器"))
             player_path = filedialog.askopenfilename(
-                title="请手动选择 mpv.exe 或 smplayer.exe",
-                filetypes=[("播放器", "mpv.exe;smplayer.exe;mpvnet.exe"), ("所有文件", "*.*")],
+                title="请手动选择 smplayer.exe",
+                filetypes=[("SMPlayer", "smplayer.exe"), ("所有文件", "*.*")],
             )
             if not player_path:
                 self._log("[!] 未选择播放器，功能不可用。")
                 self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
                 return
-            kind = "mpv" if "mpv" in player_path.lower() else "smplayer"
 
         self.player_path = player_path
-        self.player_kind = kind
         self._log(f"[+] 播放器: {player_path}")
 
         self.session = requests.Session()
@@ -409,7 +407,7 @@ class App:
 
     # ---------- 播放 ----------
     def _play_bili(self, bvid):
-        from bili_clipboard_dolby import get_cid, get_playurl, pick_dolby_streams, launch_mpv
+        from bili_clipboard_dolby import get_cid, get_playurl, pick_dolby_streams, launch_player
         cid, title = get_cid(self.session, bvid)
         data = get_playurl(self.session, bvid, cid, self.img_key, self.sub_key)
         dash = data.get("dash")
@@ -418,14 +416,12 @@ class App:
             return
         vurl, aurl, vd, ad = pick_dolby_streams(dash)
         self._add_history("B站", bvid, title, vd, ad or "普通音频")
-        launch_mpv(self.player_path, vurl, aurl, title, self.sessdata)
+        launch_player(self.player_path, vurl, title, audio_url=aurl, sessdata=self.sessdata)
 
     def _play_yt(self, ytid):
+        from bili_clipboard_dolby import launch_player
         url = f"https://www.youtube.com/watch?v={ytid}"
-        if self.player_kind == "mpv":
-            _popen_silent([self.player_path, url, "--ytdl-format=bestvideo+bestaudio/best"])
-        else:
-            _popen_silent([self.player_path, url])
+        launch_player(self.player_path, url, url)
         self._add_history("YT", ytid, url, "—", "—")
 
     # ---------- 退出 ----------
