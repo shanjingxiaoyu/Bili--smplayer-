@@ -22,6 +22,27 @@ from functools import reduce
 from pathlib import Path
 from shutil import which
 
+# ---- subprocess helpers: hide console window on Windows (no flashing cmd) ----
+def _popen_silent(*args, **kwargs):
+    """Popen with hidden console on Windows."""
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs.setdefault("startupinfo", si)
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.Popen(*args, **kwargs)
+
+def _run_silent(*args, **kwargs):
+    """subprocess.run with hidden console on Windows."""
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs.setdefault("startupinfo", si)
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.run(*args, **kwargs)
+
 # ============================================================================
 # 0. 自检 & 自动安装依赖
 # ============================================================================
@@ -40,7 +61,7 @@ def _install(pkg, imp=None):
         __import__(imp.replace("-", "_"))
     except ImportError:
         print(f"[*] 安装缺失依赖: {pkg} …")
-        subprocess.run(
+        _run_silent(
             [sys.executable, "-m", "pip", "install", pkg],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -389,7 +410,7 @@ def launch_mpv(mpv_path, video_url, audio_url, title, sessdata):
         cmd += [f"--audio-file={audio_url}"]
 
     print(f"    唤起 mpv: {title}")
-    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True)
+    proc = _popen_silent(cmd, stderr=subprocess.PIPE, text=True)
 
     # 等 mpv 拿到流后即可删 cookie 文件（mpv 已读入内存）
     time.sleep(2)
@@ -420,7 +441,7 @@ def launch_smplayer(smplayer_path, video_url, title):
         except Exception as e:
             print(f"    [!] 快捷方式唤起失败({e})，回退。")
     print(f"    唤起 SMPlayer: {title}")
-    subprocess.Popen([smplayer_path, video_url])
+    _popen_silent([smplayer_path, video_url])
 
 
 # ============================================================================
@@ -433,7 +454,7 @@ def read_clipboard() -> str:
     """
     # 方式 1: PowerShell Get-Clipboard（用户终端会话下最稳）
     try:
-        r = subprocess.run(
+        r = _run_silent(
             ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
             capture_output=True, text=True, timeout=3,
         )
@@ -481,13 +502,13 @@ def process_youtube(player_path, kind, ytid):
     print(f"    唤起 mpv (YouTube): {url}")
 
     if kind == "mpv":
-        subprocess.Popen([
+        _popen_silent([
             player_path, url,
             "--vo=gpu-next",
             "--ytdl-format=bestvideo+bestaudio/best",
         ])
     else:
-        subprocess.Popen([player_path, url])
+        _popen_silent([player_path, url])
     print(f"    [+] mpv 正在播放: {url}")
 
 

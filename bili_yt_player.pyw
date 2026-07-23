@@ -15,7 +15,29 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
 from datetime import datetime
+import subprocess as sp
 from dotenv import load_dotenv
+
+# ---- subprocess helpers: hide console window on Windows (no flashing cmd) ----
+def _popen_silent(*args, **kwargs):
+    """Popen with hidden console on Windows."""
+    if sys.platform == "win32":
+        si = sp.STARTUPINFO()
+        si.dwFlags |= sp.STARTF_USESHOWWINDOW
+        si.wShowWindow = sp.SW_HIDE
+        kwargs.setdefault("startupinfo", si)
+        kwargs.setdefault("creationflags", sp.CREATE_NO_WINDOW)
+    return sp.Popen(*args, **kwargs)
+
+def _run_silent(*args, **kwargs):
+    """subprocess.run with hidden console on Windows."""
+    if sys.platform == "win32":
+        si = sp.STARTUPINFO()
+        si.dwFlags |= sp.STARTF_USESHOWWINDOW
+        si.wShowWindow = sp.SW_HIDE
+        kwargs.setdefault("startupinfo", si)
+        kwargs.setdefault("creationflags", sp.CREATE_NO_WINDOW)
+    return sp.run(*args, **kwargs)
 
 # PyInstaller 打包后 __file__ 指向临时目录，改用 sys.executable
 if getattr(sys, "frozen", False):
@@ -391,12 +413,11 @@ class App:
         launch_mpv(self.player_path, vurl, aurl, title, self.sessdata)
 
     def _play_yt(self, ytid):
-        import subprocess as sp
         url = f"https://www.youtube.com/watch?v={ytid}"
         if self.player_kind == "mpv":
-            sp.Popen([self.player_path, url, "--ytdl-format=bestvideo+bestaudio/best"])
+            _popen_silent([self.player_path, url, "--ytdl-format=bestvideo+bestaudio/best"])
         else:
-            sp.Popen([self.player_path, url])
+            _popen_silent([self.player_path, url])
         self._add_history("YT", ytid, url, "—", "—")
 
     # ---------- 退出 ----------
@@ -407,9 +428,8 @@ class App:
 
 
 def _read_clipboard() -> str:
-    import subprocess as sp
     try:
-        r = sp.run(
+        r = _run_silent(
             ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
             capture_output=True, text=True, timeout=3,
         )
