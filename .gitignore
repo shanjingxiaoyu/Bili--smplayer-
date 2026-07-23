@@ -13,3 +13,5 @@ _*/
 gui_preview.html
 _*.py
 *.spec
+!bili_yt_player.spec
+.claude/
