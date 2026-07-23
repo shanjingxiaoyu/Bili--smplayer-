@@ -12,7 +12,7 @@ import re
 import time
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 from datetime import datetime
 import subprocess as sp
@@ -39,12 +39,21 @@ def _run_silent(*args, **kwargs):
         kwargs.setdefault("creationflags", sp.CREATE_NO_WINDOW)
     return sp.run(*args, **kwargs)
 
+# ---- PyInstaller --windowed 模式下 sys.stdout/stderr 为 None，任何 print() 都会崩溃 ----
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 # PyInstaller 打包后 __file__ 指向临时目录，改用 sys.executable
+# 配置目录：优先使用 %APPDATA%，确保 exe 放在 Program Files 等受限目录时也有写权限
 if getattr(sys, "frozen", False):
-    SCRIPT_DIR = Path(sys.executable).resolve().parent
+    _exe_dir = Path(sys.executable).resolve().parent
 else:
-    SCRIPT_DIR = Path(__file__).resolve().parent
-ENV_PATH = SCRIPT_DIR / ".env"
+    _exe_dir = Path(__file__).resolve().parent
+_CONFIG_DIR = Path(os.environ.get("APPDATA", str(_exe_dir))) / "BiliYTPlayer"
+_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+ENV_PATH = _CONFIG_DIR / ".env"
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
 YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})")
 
@@ -307,7 +316,6 @@ class App:
         player_path, kind = find_player()
         if not player_path:
             self.root.after(0, lambda: self._log("[!] 未找到播放器"))
-            from tkinter import filedialog
             player_path = filedialog.askopenfilename(
                 title="请手动选择 mpv.exe 或 smplayer.exe",
                 filetypes=[("播放器", "mpv.exe;smplayer.exe;mpvnet.exe"), ("所有文件", "*.*")],
@@ -451,7 +459,9 @@ if __name__ == "__main__":
         tk.mainloop()
     except Exception:
         import traceback
-        log_path = Path(sys.executable).parent / "BiliYTPlayer_error.log"
+        _log_dir = Path(os.environ.get("APPDATA", str(Path.home()))) / "BiliYTPlayer"
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = _log_dir / "BiliYTPlayer_error.log"
         with open(log_path, "w", encoding="utf-8") as f:
             traceback.print_exc(file=f)
         try:
