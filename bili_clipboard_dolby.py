@@ -305,6 +305,15 @@ def _mixin_key(orig: str) -> str:
 
 def get_wbi_keys(session: requests.Session):
     resp = session.get(
+        "https://api.bilibili.com/x/web-interface/nav",
+        headers=COMMON_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    d = resp.json()["data"]["wbi_img"]
+    img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
+    sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
+    return img_key, sub_key
 
 
 def validate_sessdata(sessdata: str) -> bool:
