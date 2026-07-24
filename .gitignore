@@ -1,8 +1,32 @@
+# 敏感凭据
 .env
+
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# 构建产物
+build/
+dist/
+*.exe
+*.tar.gz
+*.zip
+
+# 发布包
 release/
+BiliYTPlayer_release/
+BiliYTPlayer_release.*
+
+# 便携播放器（通过 Releases 分发）
+mpv-portable/
+
+# 开发工具缓存
+.claude/
+.vscode/
+.idea/
+
+# 临时文件
 _d/
 _tmp/
 _out/
@@ -12,13 +36,7 @@ _d1/
 _*/
 gui_preview.html
 _*.py
+
+# PyInstaller spec（保留主 spec）
 *.spec
 !bili_yt_player.spec
-.claude/
-
-# Build & release artifacts
-build/
-dist/
-mpv-portable/
-BiliYTPlayer_release/
-BiliYTPlayer_release.*

@@ -6,6 +6,9 @@ bili_yt_player.pyw — 剪贴板直连播放器 GUI
 双击启动：首次输入 SESSDATA，之后最小化到后台，复制 B 站/YouTube 链接即播。
 """
 
+import sys
+assert sys.version_info >= (3, 10), "需要 Python 3.10+"
+
 import os
 import sys
 import re
@@ -116,7 +119,8 @@ def _web_sessdata_input(env_path: Path) -> str | None:
     """启动临时 HTTP 服务 → 浏览器打开配置页 → 等待用户提交 → 保存 .env → 返回 SESSDATA。"""
     import webbrowser
     import json
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import socket
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
     from urllib.parse import urlparse, parse_qs
 
     result = {"value": None, "done": False}
@@ -151,12 +155,27 @@ def _web_sessdata_input(env_path: Path) -> str | None:
         def log_message(self, *args):
             pass  # 静默 HTTP 日志
 
-    server = HTTPServer(("127.0.0.1", 18921), Handler)
+    # 检测端口可用性，被占用则自动选下一个
+    port = 18921
+    for _offset in range(10):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+            sock.close()
+            break
+        except OSError:
+            port += 1
+            sock.close()
+    else:
+        print("[!] 无法绑定 HTTP 端口 (18921-18930 均被占用)。", flush=True)
+        return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
 
-    webbrowser.open("http://127.0.0.1:18921")
-    print("[*] 已打开浏览器配置页面，请在页面中粘贴 SESSDATA。", flush=True)
+    webbrowser.open(f"http://127.0.0.1:{port}")
+    print(f"[*] 已打开浏览器配置页面 (端口 {port})，请在页面中粘贴 SESSDATA。", flush=True)
 
     # 轮询等待用户提交,120 秒超时防止无限阻塞
     deadline = time.time() + 120
@@ -254,9 +273,14 @@ class App:
         self.status_text.configure(state="disabled")
 
     def _add_history(self, platform, vid, title, quality, audio):
+        """线程安全：后台线程只做数据处理，UI 操作通过 root.after 调度到主线程。"""
         ts = datetime.now().strftime("%H:%M")
         line = f"[{ts}] {platform} {vid}  {title}  |  {quality}  {audio}"
         self.history.append(line)
+        self.root.after(0, self._add_history_ui, line)
+
+    def _add_history_ui(self, line):
+        """主线程执行：安全操作 tkinter 控件。"""
         self.hist_text.configure(state="normal")
         self.hist_text.insert("end", line + "\n")
         self.hist_text.see("end")

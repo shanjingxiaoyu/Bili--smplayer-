@@ -10,6 +10,9 @@ bili_clipboard_dolby.py
 不挑终端——UWP 客户端、Edge/Chrome 网页、微信/QQ 别人发的链接，复制即播。
 """
 
+import sys
+assert sys.version_info >= (3, 10), "需要 Python 3.10+"
+
 import os
 import sys
 import re
@@ -320,11 +323,12 @@ def validate_sessdata(sessdata: str) -> bool:
     """检查 SESSDATA 是否有效。返回 True=有效, False=过期。"""
     try:
         s = requests.Session()
+        s.trust_env = False  # 不走系统代理,直连 B 站
         s.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
         r = s.get(
             "https://api.bilibili.com/x/web-interface/nav",
             headers=COMMON_HEADERS,
-            timeout=10,
+            timeout=5,
         )
         r.raise_for_status()
         j = r.json()
@@ -467,14 +471,6 @@ def pick_dolby_streams(dash: dict):
 # ============================================================================
 # 6. 唤起播放器
 # ============================================================================
-
-def build_http_header_arg(sessdata: str) -> str:
-    return ",".join([
-        f"Referer: {REFERER}",
-        f"User-Agent: {UA}",
-        f"Cookie: SESSDATA={sessdata}",
-    ])
-
 
 def _pause_browser_media():
     """发送 Windows 媒体暂停键(VK_MEDIA_PLAY_PAUSE),浏览器会响应暂停视频。"""
@@ -669,6 +665,7 @@ def main():
     print(f"[+] 播放器: {player_path}", flush=True)
 
     session = requests.Session()
+    session.trust_env = False  # 不走系统代理,直连 B 站
     session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
 
     try:
