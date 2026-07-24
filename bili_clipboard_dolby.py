@@ -476,6 +476,21 @@ def build_http_header_arg(sessdata: str) -> str:
     ])
 
 
+def _pause_browser_media():
+    """发送 Windows 媒体暂停键(VK_MEDIA_PLAY_PAUSE),浏览器会响应暂停视频。"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        VK_MEDIA_PLAY_PAUSE = 0xB3
+        KEYEVENTF_EXTENDEDKEY = 0x0001
+        KEYEVENTF_KEYUP = 0x0002
+        ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_EXTENDEDKEY, 0)
+        ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+    except Exception:
+        pass  # 静默失败,不影响主流程
+
+
 def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
     """直接唤起 mpv 播放（从 SMPlayer 目录取的自带 mpv）。
        不走 SMPlayer 中间层，参数原样生效。
@@ -493,6 +508,7 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         "--ao=wasapi",              # 显式强制 WASAPI，避免降级到 dsound
         "--vo=gpu-next",            # 使用 libplacebo 渲染
         "--gpu-context=d3d11",      # 强制 D3D11 后端，绕过虚拟显示器干扰
+        "--ontop",                  # mpv 窗口置顶，覆盖浏览器
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
 
@@ -521,6 +537,9 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
     # （URL 已由 process_youtube 通过 yt-dlp extract_info 预处理为直链）
 
     print(f"    唤起 mpv: {title}")
+    # 先发媒体暂停键让浏览器视频暂停,再启动 mpv(避免 mpv 也收到暂停)
+    _pause_browser_media()
+    time.sleep(0.2)
     # 启动 mpv: 只需抑制控制台弹窗(CREATE_NO_WINDOW), 不能用 SW_HIDE(会隐藏 mpv 主窗口!)
     popen_kw = {}
     if sys.platform == "win32":
