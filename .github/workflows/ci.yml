@@ -1,0 +1,76 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── CI: 代码检查（push/PR 到 main 时触发） ──
+  lint:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 语法检查
+        run: |
+          python -m py_compile bili_clipboard_dolby.py
+          python -m py_compile bili_yt_player.pyw
+          echo "All syntax checks passed."
+
+  # ── Release: 推 tag 时自动打包 EXE + 发布 ──
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖 + PyInstaller
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 打包 EXE
+        env:
+          SAFE_DELETE_DISABLE: "1"
+        run: python -m PyInstaller --noconfirm bili_yt_player.spec
+
+      - name: 下载 mpv-portable
+        shell: pwsh
+        run: |
+          mkdir release\BiliYTPlayer\mpv-portable
+          Invoke-WebRequest -Uri "https://sourceforge.net/projects/mpv-player-windows/files/64bit-v3/mpv-x86_64-v3-20250223.7z/download" -OutFile mpv.7z
+          7z x mpv.7z -orelease\BiliYTPlayer\mpv-portable mpv.exe
+
+      - name: 整理发布目录
+        run: |
+          Copy-Item dist\BiliYTPlayer.exe release\BiliYTPlayer\
+          Copy-Item README.md release\BiliYTPlayer\
+          Copy-Item LICENSE release\BiliYTPlayer\
+
+      - name: 打包 zip
+        run: Compress-Archive -Path release\BiliYTPlayer\* -DestinationPath release\BiliYTPlayer.zip
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }}"
+          files: release/BiliYTPlayer.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
