@@ -158,8 +158,13 @@ def _web_sessdata_input(env_path: Path) -> str | None:
     webbrowser.open("http://127.0.0.1:18921")
     print("[*] 已打开浏览器配置页面，请在页面中粘贴 SESSDATA。", flush=True)
 
-    # 轮询等待用户提交
+    # 轮询等待用户提交,120 秒超时防止无限阻塞
+    deadline = time.time() + 120
     while not result["done"]:
+        if time.time() > deadline:
+            server.shutdown()
+            print("[!] SESSDATA 输入超时。", flush=True)
+            return None
         time.sleep(0.3)
 
     server.shutdown()
@@ -190,14 +195,6 @@ class App:
 
         self._build_ui()
 
-        # 检查 SESSDATA 是否过期,过期则自动清除并触发重填
-        if self.sessdata:
-            from bili_clipboard_dolby import validate_sessdata
-            if not validate_sessdata(self.sessdata):
-                self._log("[!] SESSDATA 已过期,请重新输入。")
-                ENV_PATH.unlink(missing_ok=True)
-                self.sessdata = None
-
         if not self.sessdata:
             # 无 SESSDATA → 浏览器弹 HTML 配置页
             self.sessdata = _web_sessdata_input(ENV_PATH)
@@ -205,8 +202,8 @@ class App:
                 self.root.destroy()
                 sys.exit(0)
 
+        # 后台线程做 SESSDATA 校验+初始化,避免网络阻塞 GUI
         self._show_status_page()
-        self.start_monitor()
 
     # ---------- UI ----------
     def _build_ui(self):
@@ -326,25 +323,40 @@ class App:
         threading.Thread(target=self._init_backend, daemon=True).start()
 
     def _init_backend(self):
-        from bili_clipboard_dolby import find_player, get_wbi_keys
-        import requests
-
+        from bili_clipboard_dolby import find_player
+        self.root.after(0, lambda: self._log("[*] 检测播放器…"))
         player_path = find_player()
-        if not player_path:
-            self.root.after(0, lambda: self._log("[!] 未找到播放器"))
-            player_path = filedialog.askopenfilename(
-                title="请手动选择 mpv.exe（通常在 SMPlayer 安装目录的 mpv 子目录下）",
-                filetypes=[("mpv", "mpv.exe"), ("SMPlayer", "smplayer.exe"), ("所有文件", "*.*")],
-            )
-            if not player_path:
-                self._log("[!] 未选择播放器，功能不可用。")
-                self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
-                return
+        if player_path:
+            self._continue_init(player_path)
+        else:
+            self.root.after(0, lambda: self._log("[!] 未找到播放器,请手动选择…"))
+            # 文件对话框必须在主线程,用 after 调度
+            self.root.after(0, lambda: self._ask_player_and_init())
+
+    def _ask_player_and_init(self):
+        """在主线程弹出文件对话框,然后继续初始化。"""
+        path = filedialog.askopenfilename(
+            title="请手动选择 mpv.exe（通常在 SMPlayer 安装目录的 mpv 子目录下）",
+            filetypes=[("mpv", "mpv.exe"), ("SMPlayer", "smplayer.exe"), ("所有文件", "*.*")],
+        )
+        if path:
+            self._continue_init(path)
+        else:
+            self._log("[!] 未选择播放器,功能不可用。")
+            self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
+
+    def _continue_init(self, player_path):
+        """播放器已确定,继续初始化 B 站鉴权和监听。"""
+        from bili_clipboard_dolby import get_wbi_keys
+        import requests
 
         self.player_path = player_path
         self._log(f"[+] 播放器: {player_path}")
 
+        # ---- B 站鉴权(一次 nav API 同时校验登录态 + 获取 WBI key) ----
+        self.root.after(0, lambda: self._log("[*] B 站鉴权…"))
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.cookies.set("SESSDATA", self.sessdata, domain=".bilibili.com")
 
         try:
@@ -352,8 +364,24 @@ class App:
             self._log("[+] B 站鉴权就绪。")
         except Exception as e:
             self._log(f"[!] B 站鉴权失败: {e}")
-            self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
-            return
+            # 可能是 SESSDATA 过期,清除并重试
+            self.root.after(0, lambda: self._log("[!] SESSDATA 可能已过期,请重新输入。"))
+            ENV_PATH.unlink(missing_ok=True)
+            self.sessdata = _web_sessdata_input(ENV_PATH)
+            if not self.sessdata:
+                self.root.after(0, self._quit)
+                return
+            # 用新 SESSDATA 重试
+            self.session = requests.Session()
+            self.session.trust_env = False
+            self.session.cookies.set("SESSDATA", self.sessdata, domain=".bilibili.com")
+            try:
+                self.img_key, self.sub_key = get_wbi_keys(self.session)
+                self._log("[+] B 站鉴权就绪。")
+            except Exception as e2:
+                self._log(f"[!] B 站鉴权仍然失败: {e2}")
+                self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
+                return
 
         try:
             import yt_dlp  # noqa
