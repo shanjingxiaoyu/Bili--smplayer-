@@ -407,14 +407,7 @@ class App:
                 self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
                 return
 
-        try:
-            import yt_dlp  # noqa
-            self.yt_ok = True
-            self._log("[+] YouTube 就绪 (yt-dlp)。")
-        except ImportError:
-            self.yt_ok = False
-            self._log("[!] YouTube 不可用：需 pip install yt-dlp")
-
+        # YouTube 由 mpv ytdl_hook + 内置 yt-dlp.exe 处理，无需 Python 端依赖
         self._log("[*] 监听中 — 复制 B 站 / YouTube 链接即可播放。")
         self.root.after(0, lambda: self.pause_btn.configure(text="暂停监听", state="normal"))
         self.root.after(0, self.start_monitor)
@@ -464,10 +457,7 @@ class App:
                 if vid != last_vid:
                     last_vid = vid
                     self._log(f">> YouTube: {vid}")
-                    if not getattr(self, "yt_ok", False):
-                        self._log("  [!] yt-dlp 未安装，跳过")
-                    else:
-                        self._play_yt(vid)
+                    self._play_yt(vid)
                 time.sleep(0.5)
                 continue
 
