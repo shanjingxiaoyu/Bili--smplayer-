@@ -73,6 +73,26 @@ _CONFIG_DIR = Path(os.environ.get("APPDATA", str(_exe_dir))) / "BiliYTPlayer"
 _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ENV_PATH = _CONFIG_DIR / ".env"
 
+# 代理缓存：启动时扫描一次，避免每回播放都扫端口
+_AUTO_PROXY = None
+
+def find_proxy():
+    """扫描常见本地代理端口（Clash/V2Ray/SSR 等），返回 http://127.0.0.1:port 或 None。"""
+    global _AUTO_PROXY
+    if _AUTO_PROXY is not None:
+        return _AUTO_PROXY
+    import socket
+    for port in [7890, 7891, 1080, 10809, 8118, 9090]:
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+            s.close()
+            _AUTO_PROXY = f"http://127.0.0.1:{port}"
+            return _AUTO_PROXY
+        except OSError:
+            continue
+    _AUTO_PROXY = ""
+    return None
+
 
 def _install(pkg, imp=None):
     if imp is None:
@@ -125,6 +145,7 @@ MIXIN_KEY_ENC_TAB = [
 ]
 
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
+YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 EP_RE = re.compile(r"/ep(\d+)")
 SS_RE = re.compile(r"/ss(\d+)")
 BANGUMI_MD_RE = re.compile(r"/md(\d+)")
@@ -494,6 +515,7 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
 
     # 便携配置目录（相对于 mpv-portable/portable_config/）
     portable_conf = str(_exe_dir / "mpv-portable" / "portable_config")
+    ytdlp_exe = str(_exe_dir / "mpv-portable" / "yt-dlp.exe")
 
     # 基础命令：使用便携配置，针对 B 站 DASH + 杜比视界 + 高刷显示器优化
     cmd = [
@@ -504,6 +526,13 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         "--load-scripts=no",              # 跳过外部脚本，避免干扰
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
+
+    # YouTube / 非 B 站：有代理自动走代理
+    if not sessdata:
+        cmd.append(f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}")
+        proxy = find_proxy()
+        if proxy:
+            cmd.append(f"--http-proxy={proxy}")
 
     # B 站：CDN 直链，音视频分离 + cookie 鉴权
     if sessdata:
@@ -622,7 +651,7 @@ def main():
             pass
 
     print("=" * 56, flush=True)
-    print(" B 站剪贴板直连播放器", flush=True)
+    print(" B 站 / YouTube 剪贴板直连播放器", flush=True)
     print("=" * 56, flush=True)
 
     sessdata = load_sessdata()
@@ -678,6 +707,17 @@ def main():
             time.sleep(0.5)
             continue
 
+        # ---- YouTube：有代理走代理，没代理直连（国外正常/国内连不上） ----
+        m = YT_RE.search(text)
+        if m:
+            ytid = m.group(1)
+            if ytid != last_vid:
+                last_vid = ytid
+                print(f"\n>> 检测到 YouTube 链接: {ytid}", flush=True)
+                url = f"https://www.youtube.com/watch?v={ytid}"
+                launch_player(player_path, url, url)
+            time.sleep(0.5)
+            continue
 
         # ---- 番剧/电影 (EP/SS) ----
         m = EP_RE.search(text)

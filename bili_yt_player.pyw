@@ -65,6 +65,7 @@ _CONFIG_DIR = Path(os.environ.get("APPDATA", str(_exe_dir))) / "BiliYTPlayer"
 _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ENV_PATH = _CONFIG_DIR / ".env"
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
+YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 EP_RE = re.compile(r"/ep(\d+)")
 
 
@@ -406,7 +407,11 @@ class App:
                 self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
                 return
 
-        # YouTube 由 mpv ytdl_hook + 内置 yt-dlp.exe 处理，无需 Python 端依赖
+        # YouTube：自动检测本地代理（Clash/V2Ray 等），有则走代理
+        from bili_clipboard_dolby import find_proxy
+        proxy = find_proxy()
+        if proxy:
+            self._log(f"[+] 检测到代理: {proxy}（YouTube 可用）。")
         self._log("[*] 监听中 — 复制 B 站 / YouTube 链接即可播放。")
         self.root.after(0, lambda: self.pause_btn.configure(text="暂停监听", state="normal"))
         self.root.after(0, self.start_monitor)
@@ -447,6 +452,16 @@ class App:
                         self._play_bili(vid)
                     except Exception as e:
                         self._log(f"  [!] {e}")
+                time.sleep(0.5)
+                continue
+
+            m = YT_RE.search(text)
+            if m:
+                vid = m.group(1)
+                if vid != last_vid:
+                    last_vid = vid
+                    self._log(f">> YouTube: {vid}")
+                    self._play_yt(vid)
                 time.sleep(0.5)
                 continue
 
@@ -491,6 +506,11 @@ class App:
         vurl, aurl, vd, ad = pick_dolby_streams(dash)
         self._add_history("番剧", f"ep{ep_id}", full_title, vd, ad or "普通音频")
         launch_player(self.player_path, vurl, full_title, audio_url=aurl, sessdata=self.sessdata)
+
+    def _play_yt(self, ytid):
+        from bili_clipboard_dolby import launch_player
+        url = f"https://www.youtube.com/watch?v={ytid}"
+        launch_player(self.player_path, url, url)
 
     # ---------- 退出 ----------
     def _quit(self):
