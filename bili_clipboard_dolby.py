@@ -527,9 +527,12 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
 
-    # YouTube / 非 B 站：有代理自动走代理
+    # YouTube / 非 B 站：有代理自动走代理，最高画质（最高 4K）
     if not sessdata:
-        cmd.append(f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}")
+        cmd += [
+            f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}",
+            "--ytdl-format=bestvideo[height<=2160]+bestaudio/best",
+        ]
         proxy = find_proxy()
         if proxy:
             cmd.append(f"--http-proxy={proxy}")
