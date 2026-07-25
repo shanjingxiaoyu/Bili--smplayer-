@@ -125,7 +125,7 @@ MIXIN_KEY_ENC_TAB = [
 ]
 
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
-YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})")
+YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 EP_RE = re.compile(r"/ep(\d+)")
 SS_RE = re.compile(r"/ss(\d+)")
 BANGUMI_MD_RE = re.compile(r"/md(\d+)")
@@ -495,6 +495,8 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
 
     # 便携配置目录（相对于 mpv-portable/portable_config/）
     portable_conf = str(_exe_dir / "mpv-portable" / "portable_config")
+    # yt-dlp.exe 路径（mpv ytdl_hook 用于解析 YouTube）
+    ytdlp_exe = str(_exe_dir / "mpv-portable" / "yt-dlp.exe")
 
     # 基础命令：使用便携配置，针对 B 站 DASH + 杜比视界 + 高刷显示器优化
     cmd = [
@@ -503,6 +505,7 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         f"--force-media-title={title}",
         f"--config-dir={portable_conf}",  # 加载便携 mpv.conf（视频同步/网络缓冲/HDR映射）
         "--load-scripts=no",              # 跳过外部脚本，避免干扰
+        f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}",  # 让 mpv 自己用 yt-dlp 解析 YouTube
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
 
