@@ -65,7 +65,6 @@ _CONFIG_DIR = Path(os.environ.get("APPDATA", str(_exe_dir))) / "BiliYTPlayer"
 _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ENV_PATH = _CONFIG_DIR / ".env"
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
-YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 EP_RE = re.compile(r"/ep(\d+)")
 
 
@@ -451,16 +450,6 @@ class App:
                 time.sleep(0.5)
                 continue
 
-            m = YT_RE.search(text)
-            if m:
-                vid = m.group(1)
-                if vid != last_vid:
-                    last_vid = vid
-                    self._log(f">> YouTube: {vid}")
-                    self._play_yt(vid)
-                time.sleep(0.5)
-                continue
-
             m = EP_RE.search(text)
             if m:
                 ep_id = m.group(1)
@@ -502,13 +491,6 @@ class App:
         vurl, aurl, vd, ad = pick_dolby_streams(dash)
         self._add_history("番剧", f"ep{ep_id}", full_title, vd, ad or "普通音频")
         launch_player(self.player_path, vurl, full_title, audio_url=aurl, sessdata=self.sessdata)
-
-    def _play_yt(self, ytid):
-        from bili_clipboard_dolby import launch_player
-        url = f"https://www.youtube.com/watch?v={ytid}"
-        self._log(f"  [>] 解析中（mpv ytdl_hook + yt-dlp）...")
-        launch_player(self.player_path, url, url)
-        self._add_history("YT", ytid, url, "—", "—")
 
     # ---------- 退出 ----------
     def _quit(self):

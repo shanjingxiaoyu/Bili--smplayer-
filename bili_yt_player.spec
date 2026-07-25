@@ -14,8 +14,6 @@ _block_cipher = None
 _hidden_imports = [
     # 跨文件动态导入（bili_yt_player.pyw 内部 import bili_clipboard_dolby）
     "bili_clipboard_dolby",
-    # YouTube 支持
-    "yt_dlp",
     # tkinter 延迟导入
     "tkinter.filedialog",
     # pyperclip 平台后端

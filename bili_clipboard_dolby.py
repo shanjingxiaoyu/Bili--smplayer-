@@ -125,7 +125,6 @@ MIXIN_KEY_ENC_TAB = [
 ]
 
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
-YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 EP_RE = re.compile(r"/ep(\d+)")
 SS_RE = re.compile(r"/ss(\d+)")
 BANGUMI_MD_RE = re.compile(r"/md(\d+)")
@@ -495,8 +494,6 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
 
     # 便携配置目录（相对于 mpv-portable/portable_config/）
     portable_conf = str(_exe_dir / "mpv-portable" / "portable_config")
-    # yt-dlp.exe 路径（mpv ytdl_hook 用于解析 YouTube）
-    ytdlp_exe = str(_exe_dir / "mpv-portable" / "yt-dlp.exe")
 
     # 基础命令：使用便携配置，针对 B 站 DASH + 杜比视界 + 高刷显示器优化
     cmd = [
@@ -505,7 +502,6 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         f"--force-media-title={title}",
         f"--config-dir={portable_conf}",  # 加载便携 mpv.conf（视频同步/网络缓冲/HDR映射）
         "--load-scripts=no",              # 跳过外部脚本，避免干扰
-        f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}",  # 让 mpv 自己用 yt-dlp 解析 YouTube
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
 
@@ -531,7 +527,6 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
             ]
 
     # YouTube：Python 预处理 URL，不需要外部 yt-dlp
-    # （URL 已由 process_youtube 通过 yt-dlp extract_info 预处理为直链）
 
     print(f"    唤起 mpv: {title}")
     # 先发媒体暂停键让浏览器视频暂停,再启动 mpv(避免 mpv 也收到暂停)
@@ -613,27 +608,6 @@ def process_bvid(session, bvid, img_key, sub_key, player_path, sessdata):
     launch_player(player_path, video_url, title, audio_url=audio_url, sessdata=sessdata)
 
 
-def process_youtube(player_path, ytid):
-    """YouTube：Python yt-dlp 提取直链 → mpv 播放（不依赖外部 yt-dlp）。"""
-    url = f"https://www.youtube.com/watch?v={ytid}"
-    stream_url = url  # 默认回退到原始 URL
-
-    try:
-        import yt_dlp
-        ydl_opts = {"quiet": True, "no_warnings": True, "format": "best"}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            fmt = info.get("url") or ""
-            if fmt:
-                stream_url = fmt
-    except Exception as e:
-        print(f"    [!] yt-dlp 预处理失败({e})，回退原始 URL。")
-
-    print(f"    唤起 mpv (YouTube): {url}")
-    launch_player(player_path, stream_url, url)
-    print(f"    [+] mpv 正在播放: {url}")
-
-
 # ============================================================================
 # 主循环
 # ============================================================================
@@ -648,7 +622,7 @@ def main():
             pass
 
     print("=" * 56, flush=True)
-    print(" B 站 / YouTube 剪贴板直连播放器", flush=True)
+    print(" B 站剪贴板直连播放器", flush=True)
     print("=" * 56, flush=True)
 
     sessdata = load_sessdata()
@@ -704,19 +678,6 @@ def main():
             time.sleep(0.5)
             continue
 
-        # ---- YouTube ----
-        m = YT_RE.search(text)
-        if m:
-            ytid = m.group(1)
-            if ytid != last_vid:
-                last_vid = ytid
-                print(f"\n>> 检测到 YouTube 链接: {ytid}", flush=True)
-                try:
-                    process_youtube(player_path, ytid)
-                except Exception as e:
-                    print(f"  [!] 播放失败: {e}", flush=True)
-            time.sleep(0.5)
-            continue
 
         # ---- 番剧/电影 (EP/SS) ----
         m = EP_RE.search(text)
