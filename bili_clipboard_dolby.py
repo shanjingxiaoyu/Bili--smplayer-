@@ -493,18 +493,16 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
     """
     import tempfile
 
-    # 基础命令：兼容性优先，避免 HDR 参数导致 SDR 显示器黑屏
+    # 便携配置目录（相对于 mpv-portable/portable_config/）
+    portable_conf = str(_exe_dir / "mpv-portable" / "portable_config")
+
+    # 基础命令：使用便携配置，针对 B 站 DASH + 杜比视界 + 高刷显示器优化
     cmd = [
         player_path,
         video_url,
         f"--force-media-title={title}",
-        "--no-config",              # 跳过 SMPlayer 记忆的 mpv.conf 和每文件设置
-        "--load-scripts=no",        # 跳过外部脚本，避免干扰
-        "--audio-exclusive=no",     # 共享模式，防止独占模式下 E-AC-3 崩溃
-        "--ao=wasapi",              # 显式强制 WASAPI，避免降级到 dsound
-        "--vo=gpu-next",            # 使用 libplacebo 渲染
-        "--gpu-context=d3d11",      # 强制 D3D11 后端，绕过虚拟显示器干扰
-        "--ontop",                  # mpv 窗口置顶，覆盖浏览器
+        f"--config-dir={portable_conf}",  # 加载便携 mpv.conf（视频同步/网络缓冲/HDR映射）
+        "--load-scripts=no",              # 跳过外部脚本，避免干扰
         "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
     ]
 
