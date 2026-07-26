@@ -508,36 +508,22 @@ def _pause_browser_media():
 
 
 def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
-    """直接唤起 mpv 播放（从 SMPlayer 目录取的自带 mpv）。
-       不走 SMPlayer 中间层，参数原样生效。
-    """
+    """唤起 mpv 播放。B 站（有 sessdata）走 CDN 直链 + cookie；YouTube（无 sessdata）走 ytdl_hook + 代理。"""
     import tempfile
 
-    # 便携配置目录（相对于 mpv-portable/portable_config/）
     portable_conf = str(_exe_dir / "mpv-portable" / "portable_config")
-    ytdlp_exe = str(_exe_dir / "mpv-portable" / "yt-dlp.exe")
 
-    # 基础命令：使用便携配置，针对 B 站 DASH + 杜比视界 + 高刷显示器优化
+    # ── 公共参数 ──────────────────────────────────────────────────────────
     cmd = [
         player_path,
         video_url,
         f"--force-media-title={title}",
-        f"--config-dir={portable_conf}",  # 加载便携 mpv.conf（视频同步/网络缓冲/HDR映射）
-        "--load-scripts=no",              # 跳过外部脚本，避免干扰
-        "--log-file=" + str(_CONFIG_DIR / "mpv.log"),  # 诊断日志
+        f"--config-dir={portable_conf}",
+        "--load-scripts=no",
+        "--log-file=" + str(_CONFIG_DIR / "mpv.log"),
     ]
 
-    # YouTube / 非 B 站：有代理自动走代理，最高画质（最高 4K）
-    if not sessdata:
-        cmd += [
-            f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}",
-            "--ytdl-format=bestvideo[height<=2160]+bestaudio/best",
-        ]
-        proxy = find_proxy()
-        if proxy:
-            cmd.append(f"--http-proxy={proxy}")
-
-    # B 站：CDN 直链，音视频分离 + cookie 鉴权
+    # ── B 站：CDN 直链 + cookie + DASH 音视频分离 ─────────────────────────
     if sessdata:
         cookie_fd, cookie_path = tempfile.mkstemp(
             suffix=".txt", prefix="bili_cookies_", text=True
@@ -554,9 +540,20 @@ def launch_player(player_path, video_url, title, audio_url=None, sessdata=None):
         if audio_url:
             cmd += [
                 f"--audio-file={audio_url}",
-                "--audio-demuxer=lavf",            # 显式用 lavf 解复用 .m4s 音频流
-                "--demuxer-lavf-probescore=100",   # 提高 m4s 格式探测精度
+                "--audio-demuxer=lavf",
+                "--demuxer-lavf-probescore=100",
             ]
+
+    # ── YouTube：ytdl_hook + 代理自动检测 ─────────────────────────────────
+    else:
+        ytdlp_exe = str(_exe_dir / "mpv-portable" / "yt-dlp.exe")
+        cmd += [
+            f"--script-opts=ytdl_hook-ytdl_path={ytdlp_exe}",
+            "--ytdl-format=bestvideo[height<=2160]+bestaudio/best",
+        ]
+        proxy = find_proxy()
+        if proxy:
+            cmd.append(f"--http-proxy={proxy}")
 
     # YouTube：Python 预处理 URL，不需要外部 yt-dlp
 
