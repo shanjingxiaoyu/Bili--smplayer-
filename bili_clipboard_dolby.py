@@ -333,7 +333,10 @@ def get_wbi_keys(session: requests.Session):
         timeout=10,
     )
     resp.raise_for_status()
-    d = resp.json()["data"]["wbi_img"]
+    j = resp.json()
+    if j.get("code") != 0:
+        raise RuntimeError(f"SESSDATA 过期或无效: {j.get('message', 'unknown')}")
+    d = j["data"]["wbi_img"]
     img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
     sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
     return img_key, sub_key
