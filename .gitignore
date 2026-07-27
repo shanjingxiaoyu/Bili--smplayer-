@@ -17,6 +17,7 @@ dist/
 release/
 BiliYTPlayer_release/
 BiliYTPlayer_release.*
+_release_pkg/
 
 # 便携播放器（��过 Releases 分发，但配置文件属源码）
 mpv-portable/*

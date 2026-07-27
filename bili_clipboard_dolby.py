@@ -426,6 +426,48 @@ def resolve_episode(session: requests.Session, ep_id: int) -> tuple[str, int, st
             return bvid, int(cid), full_title
     raise RuntimeError(f"未找到 EP {ep_id}")
 
+def resolve_ss(session: requests.Session, ss_id: int) -> tuple[str, int, str]:
+    """通过 SS(番剧合集) ID 获取第一个 EP 的 bvid, cid, title。
+       返回 (bvid, cid, full_title)。"""
+    resp = session.get(
+        "https://api.bilibili.com/pgc/view/web/season",
+        params={"season_id": ss_id},
+        headers=COMMON_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    j = resp.json()
+    if j.get("code") != 0:
+        raise RuntimeError(f"获取番剧合集失败: {j.get('message')}")
+    result = j["result"]
+    season_title = result.get("season_title", "") or result.get("title", "")
+    episodes = result.get("episodes", [])
+    if not episodes:
+        raise RuntimeError("该合集下没有剧集")
+    first_ep = episodes[0]
+    return first_ep["bvid"], int(first_ep["cid"]), f"{season_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or f'第{first_ep.get(\"title\",\"?\")}集'}"
+
+def resolve_md(session: requests.Session, md_id: int) -> tuple[str, int, str]:
+    """通过 MD(媒体详情页) ID 获取第一个 EP 的 bvid, cid, title。
+       返回 (bvid, cid, full_title)。"""
+    resp = session.get(
+        "https://api.bilibili.com/pgc/review/user",
+        params={"media_id": md_id},
+        headers=COMMON_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    j = resp.json()
+    if j.get("code") != 0:
+        raise RuntimeError(f"获取媒体信息失败: {j.get('message')}")
+    result = j["result"]
+    media_title = result.get("media", {}).get("title", "") or result.get("title", "")
+    episodes = result.get("media", {}).get("episodes", []) or result.get("episodes", [])
+    if not episodes:
+        raise RuntimeError("该媒体页下没有剧集")
+    first_ep = episodes[0]
+    return first_ep["bvid"], int(first_ep["cid"]), f"{media_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or f'第{first_ep.get(\"title\",\"?\")}集'}"
+
 def get_cid(session: requests.Session, bvid: str):
     resp = session.get(
         "https://api.bilibili.com/x/web-interface/view",

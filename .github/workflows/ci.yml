@@ -50,14 +50,21 @@ jobs:
           SAFE_DELETE_DISABLE: "1"
         run: python -m PyInstaller --noconfirm bili_yt_player.spec
 
-      - name: 下载 mpv-portable
+      - name: 下载 mpv-portable + yt-dlp
         shell: pwsh
         run: |
-          mkdir release\BiliYTPlayer\mpv-portable
+          New-Item -ItemType Directory -Force -Path release\BiliYTPlayer\mpv-portable | Out-Null
+          # mpv（含 d3dcompiler_43.dll + fonts.conf）
           Invoke-WebRequest -Uri "https://sourceforge.net/projects/mpv-player-windows/files/64bit-v3/mpv-x86_64-v3-20250223.7z/download" -OutFile mpv.7z
-          7z x mpv.7z -orelease\BiliYTPlayer\mpv-portable mpv.exe
+          7z x mpv.7z -orelease\BiliYTPlayer\mpv-portable -y
+          Remove-Item mpv.7z
+          # yt-dlp.exe（YouTube 播放必需）
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile release\BiliYTPlayer\mpv-portable\yt-dlp.exe
+          # 便携 mpv 配置
+          Copy-Item -Recurse mpv-portable\portable_config release\BiliYTPlayer\mpv-portable\
 
       - name: 整理发布目录
+        shell: pwsh
         run: |
           Copy-Item dist\BiliYTPlayer.exe release\BiliYTPlayer\
           Copy-Item README.md release\BiliYTPlayer\

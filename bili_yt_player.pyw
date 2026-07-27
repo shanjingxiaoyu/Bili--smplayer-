@@ -470,6 +470,36 @@ class App:
                 time.sleep(0.5)
                 continue
 
+            # SS 番剧合集
+            m = re.search(r"/ss(\d+)", text)
+            if m:
+                ss_id = m.group(1)
+                vid = f"ss{ss_id}"
+                if vid != last_vid:
+                    last_vid = vid
+                    self._log(f">> 番剧合集 SS: {ss_id}")
+                    try:
+                        self._play_ss(int(ss_id))
+                    except Exception as e:
+                        self._log(f"  [!] {e}")
+                time.sleep(0.5)
+                continue
+
+            # MD 媒体详情
+            m = re.search(r"/md(\d+)", text)
+            if m:
+                md_id = m.group(1)
+                vid = f"md{md_id}"
+                if vid != last_vid:
+                    last_vid = vid
+                    self._log(f">> 媒体详情 MD: {md_id}")
+                    try:
+                        self._play_md(int(md_id))
+                    except Exception as e:
+                        self._log(f"  [!] {e}")
+                time.sleep(0.5)
+                continue
+
             time.sleep(0.5)
 
     # ---------- 播放 ----------
@@ -502,6 +532,32 @@ class App:
         from bili_clipboard_dolby import launch_player
         url = f"https://www.youtube.com/watch?v={ytid}"
         launch_player(self.player_path, url, url)
+
+    def _play_ss(self, ss_id: int):
+        from bili_clipboard_dolby import get_playurl, pick_dolby_streams, launch_player, resolve_ss
+        bvid, cid, full_title = resolve_ss(self.session, ss_id)
+        self._log(f"  [+] {full_title} (BV={bvid})")
+        data = get_playurl(self.session, bvid, cid, self.img_key, self.sub_key)
+        dash = data.get("dash")
+        if not dash:
+            self._log("  [!] 无 DASH 数据")
+            return
+        vurl, aurl, vd, ad = pick_dolby_streams(dash)
+        self._add_history("番剧合集", f"ss{ss_id}", full_title, vd, ad or "普通音频")
+        launch_player(self.player_path, vurl, full_title, audio_url=aurl, sessdata=self.sessdata)
+
+    def _play_md(self, md_id: int):
+        from bili_clipboard_dolby import get_playurl, pick_dolby_streams, launch_player, resolve_md
+        bvid, cid, full_title = resolve_md(self.session, md_id)
+        self._log(f"  [+] {full_title} (BV={bvid})")
+        data = get_playurl(self.session, bvid, cid, self.img_key, self.sub_key)
+        dash = data.get("dash")
+        if not dash:
+            self._log("  [!] 无 DASH 数据")
+            return
+        vurl, aurl, vd, ad = pick_dolby_streams(dash)
+        self._add_history("媒体详情", f"md{md_id}", full_title, vd, ad or "普通音频")
+        launch_player(self.player_path, vurl, full_title, audio_url=aurl, sessdata=self.sessdata)
 
     # ---------- 退出 ----------
     def _quit(self):
