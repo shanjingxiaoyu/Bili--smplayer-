@@ -378,7 +378,7 @@ class App:
         self._log(f"[+] 播放器: {player_path}")
 
         # ---- B 站鉴权(一次 nav API 同时校验登录态 + 获取 WBI key) ----
-        self.root.after(0, lambda: self._log("[*] B 站鉴权…"))
+        self.root.after(0, lambda: self._log("[*] B 站鉴权… 连接B站API"))
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.cookies.set("SESSDATA", self.sessdata, domain=".bilibili.com")
@@ -389,7 +389,7 @@ class App:
         except Exception as e:
             self._log(f"[!] B 站鉴权失败: {e}")
             # 可能是 SESSDATA 过期,清除并重试
-            self.root.after(0, lambda: self._log("[!] SESSDATA 可能已过期,请重新输入。"))
+            self.root.after(0, lambda: self._log("[*] SESSDATA 已过期，正在打开浏览器重新登录…"))
             ENV_PATH.unlink(missing_ok=True)
             self.sessdata = _web_sessdata_input(ENV_PATH)
             if not self.sessdata:

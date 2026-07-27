@@ -330,7 +330,7 @@ def get_wbi_keys(session: requests.Session):
     resp = session.get(
         "https://api.bilibili.com/x/web-interface/nav",
         headers=COMMON_HEADERS,
-        timeout=10,
+        timeout=5,
     )
     resp.raise_for_status()
     j = resp.json()
