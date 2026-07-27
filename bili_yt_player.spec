@@ -64,7 +64,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="BiliYTPlayer",                    # 输出 exe 名称
+    name="BILIYT-Player",                  # 输出 exe 名称
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -53,31 +53,31 @@ jobs:
       - name: 下载 mpv-portable + yt-dlp
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release\BiliYTPlayer\mpv-portable | Out-Null
+          New-Item -ItemType Directory -Force -Path release\BILIYT-Player\mpv-portable | Out-Null
           # mpv（含 d3dcompiler_43.dll + fonts.conf）
           Invoke-WebRequest -Uri "https://sourceforge.net/projects/mpv-player-windows/files/64bit-v3/mpv-x86_64-v3-20250223.7z/download" -OutFile mpv.7z
-          7z x mpv.7z -orelease\BiliYTPlayer\mpv-portable -y
+          7z x mpv.7z -orelease\BILIYT-Player\mpv-portable -y
           Remove-Item mpv.7z
           # yt-dlp.exe（YouTube 播放必需）
-          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile release\BiliYTPlayer\mpv-portable\yt-dlp.exe
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile release\BILIYT-Player\mpv-portable\yt-dlp.exe
           # 便携 mpv 配置
-          Copy-Item -Recurse mpv-portable\portable_config release\BiliYTPlayer\mpv-portable\
+          Copy-Item -Recurse mpv-portable\portable_config release\BILIYT-Player\mpv-portable\
 
       - name: 整理发布目录
         shell: pwsh
         run: |
-          Copy-Item dist\BiliYTPlayer.exe release\BiliYTPlayer\
-          Copy-Item README.md release\BiliYTPlayer\
-          Copy-Item LICENSE release\BiliYTPlayer\
+          Copy-Item dist\BILIYT-Player.exe release\BILIYT-Player\
+          Copy-Item README.md release\BILIYT-Player\
+          Copy-Item LICENSE release\BILIYT-Player\
 
       - name: 打包 zip
-        run: Compress-Archive -Path release\BiliYTPlayer\* -DestinationPath release\BiliYTPlayer.zip
+        run: Compress-Archive -Path release\BILIYT-Player\* -DestinationPath release\BILIYT-Player.zip
 
       - name: 发布 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "${{ github.ref_name }}"
-          files: release/BiliYTPlayer.zip
+          files: release/BILIYT-Player.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

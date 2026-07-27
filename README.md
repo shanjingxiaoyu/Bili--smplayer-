@@ -33,13 +33,13 @@
 
 ### 开箱即用（推荐）
 
-下载 [Release](https://github.com/shanjingxiaoyu/Bili--smplayer-/releases) 中的 `BiliYTPlayer_release.zip`，解压后双击 `BiliYTPlayer.exe`。**不需要安装 Python、不需要安装 mpv。**
+下载 [Release](https://github.com/shanjingxiaoyu/BILIYT-Player/releases) 中的 `BILIYT-Player_v*.zip`，解压后双击 `BILIYT-Player.exe`。**不需要安装 Python、不需要安装 mpv。**
 
 ### 从源码运行
 
 ```bash
-git clone https://github.com/shanjingxiaoyu/Bili--smplayer-.git
-cd Bili--smplayer-
+git clone https://github.com/shanjingxiaoyu/BILIYT-Player.git
+cd BILIYT-Player
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python.exe bili_yt_player.pyw
@@ -66,7 +66,7 @@ python -m venv .venv
 |------|------|
 | `bili_yt_player.pyw` | GUI 主程序（双击启动） |
 | `bili_clipboard_dolby.py` | 后端引擎（WBI 签名 / playurl 解析 / EP 解析 / 播放器唤起） |
-| `BiliYTPlayer.exe` | 编译好的独立 exe（PyInstaller 打包） |
+| `BILIYT-Player.exe` | 编译好的独立 exe（PyInstaller 打包） |
 | `bili_yt_player.spec` | PyInstaller 打包配置 |
 | `build_exe.bat` | 一键打包脚本 |
 | `启动监听.bat` | Windows 源码快捷启动 |
@@ -85,7 +85,7 @@ python -m venv .venv
 set SAFE_DELETE_DISABLE=1
 .venv\Scripts\python.exe -m PyInstaller --noconfirm bili_yt_player.spec
 
-# 产物：dist\BiliYTPlayer.exe（约 21MB，UPX 压缩）
+# 产物：dist\BILIYT-Player.exe（约 14MB，UPX 压缩）
 ```
 
 ---
