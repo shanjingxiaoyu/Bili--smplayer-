@@ -370,37 +370,28 @@ class App:
             self.root.after(0, lambda: self.pause_btn.configure(state="disabled"))
 
     def _continue_init(self, player_path):
-        """播放器已确定,继续初始化 B 站鉴权和监听。"""
-        from bili_clipboard_dolby import get_wbi_keys
-        import requests
+        """播放器已确定，继续初始化 B 站鉴权和监听。"""
+        from bili_clipboard_dolby import init_bili_session
 
         self.player_path = player_path
         self._log(f"[+] 播放器: {player_path}")
 
-        # ---- B 站鉴权(一次 nav API 同时校验登录态 + 获取 WBI key) ----
+        # ---- B 站鉴权（单次 nav API 完成验证 + WBI 密钥获取） ----
         self.root.after(0, lambda: self._log("[*] B 站鉴权… 连接B站API"))
-        self.session = requests.Session()
-        self.session.trust_env = False
-        self.session.cookies.set("SESSDATA", self.sessdata, domain=".bilibili.com")
 
         try:
-            self.img_key, self.sub_key = get_wbi_keys(self.session)
+            self.session, self.img_key, self.sub_key = init_bili_session(self.sessdata)
             self._log("[+] B 站鉴权就绪。")
         except Exception as e:
             self._log(f"[!] B 站鉴权失败: {e}")
-            # 可能是 SESSDATA 过期,清除并重试
             self.root.after(0, lambda: self._log("[*] SESSDATA 已过期，正在打开浏览器重新登录…"))
             ENV_PATH.unlink(missing_ok=True)
             self.sessdata = _web_sessdata_input(ENV_PATH)
             if not self.sessdata:
                 self.root.after(0, self._quit)
                 return
-            # 用新 SESSDATA 重试
-            self.session = requests.Session()
-            self.session.trust_env = False
-            self.session.cookies.set("SESSDATA", self.sessdata, domain=".bilibili.com")
             try:
-                self.img_key, self.sub_key = get_wbi_keys(self.session)
+                self.session, self.img_key, self.sub_key = init_bili_session(self.sessdata)
                 self._log("[+] B 站鉴权就绪。")
             except Exception as e2:
                 self._log(f"[!] B 站鉴权仍然失败: {e2}")

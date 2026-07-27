@@ -342,11 +342,34 @@ def get_wbi_keys(session: requests.Session):
     return img_key, sub_key
 
 
+def init_bili_session(sessdata: str) -> tuple:
+    """初始化 B 站会话：单次 nav API 完成 SESSDATA 验证 + WBI 签名密钥获取。
+       validate_sessdata() + get_wbi_keys() 两次 nav 调用合并为一次，省一半网络时间。"""
+    session = requests.Session()
+    session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
+
+    resp = session.get(
+        "https://api.bilibili.com/x/web-interface/nav",
+        headers=COMMON_HEADERS,
+        timeout=(3, 5),
+    )
+    resp.raise_for_status()
+    j = resp.json()
+
+    if j.get("code") != 0:
+        raise RuntimeError(f"SESSDATA 过期或无效 (code={j.get('code')}): {j.get('message', 'unknown')}")
+
+    d = j["data"]["wbi_img"]
+    img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
+    sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
+
+    return session, img_key, sub_key
+
+
 def validate_sessdata(sessdata: str) -> bool:
-    """检查 SESSDATA 是否有效。返回 True=有效, False=过期。"""
+    """检查 SESSDATA 是否有效（保留兼容，新代码建议用 init_bili_session）。"""
     try:
         s = requests.Session()
-        s.trust_env = False  # 不走系统代理,直连 B 站
         s.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
         r = s.get(
             "https://api.bilibili.com/x/web-interface/nav",
@@ -354,9 +377,7 @@ def validate_sessdata(sessdata: str) -> bool:
             timeout=5,
         )
         r.raise_for_status()
-        j = r.json()
-        # code=0 表示登录有效, -101 表示未登录/过期
-        return j.get("code") == 0
+        return r.json().get("code") == 0
     except Exception:
         return False
 
@@ -659,28 +680,26 @@ def main():
 
     sessdata = load_sessdata()
 
-    # 检查 SESSDATA 是否有效,过期则清除 .env 并重新询问
-    if not validate_sessdata(sessdata):
-        print("[!] SESSDATA 已过期,请重新输入。", flush=True)
-        ENV_PATH.unlink(missing_ok=True)
-        sessdata = load_sessdata()
-
     player_path = find_player()
     if not player_path:
         print("[!] 未检测到 SMPlayer/mpv，请先安装 SMPlayer。", flush=True)
         sys.exit(1)
     print(f"[+] 播放器: {player_path}", flush=True)
 
-    session = requests.Session()
-    session.trust_env = False  # 不走系统代理,直连 B 站
-    session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
-
+    # 单次 nav API 完成鉴权 + WBI 密钥（原来 validate + get_wbi_keys 两次调用合并）
     try:
-        img_key, sub_key = get_wbi_keys(session)
-    except Exception as e:
-        print(f"[!] 获取 WBI 签名密钥失败: {e}", flush=True)
-        sys.exit(1)
-    print("[+] WBI 签名密钥就绪。", flush=True)
+        session, img_key, sub_key = init_bili_session(sessdata)
+        print("[+] B 站鉴权 + WBI 签名密钥就绪。", flush=True)
+    except Exception:
+        print("[!] SESSDATA 已过期，请重新输入。", flush=True)
+        ENV_PATH.unlink(missing_ok=True)
+        sessdata = load_sessdata()
+        try:
+            session, img_key, sub_key = init_bili_session(sessdata)
+            print("[+] B 站鉴权 + WBI 签名密钥就绪。", flush=True)
+        except Exception as e:
+            print(f"[!] B 站鉴权失败: {e}", flush=True)
+            sys.exit(1)
     print("\n[*] 开始监听剪贴板（Ctrl+C 停止）…", flush=True)
     print("[*] 复制 B 站 / YouTube 链接即可播放。\n", flush=True)
 

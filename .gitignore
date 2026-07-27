@@ -22,6 +22,8 @@ BiliYTPlayer_release.*
 mpv-portable/*
 !mpv-portable/portable_config/
 !mpv-portable/portable_config/*
+mpv-portable/portable_config/cache/
+mpv-portable/portable_config/watch_later/
 
 # 开发工具缓存
 .claude/
