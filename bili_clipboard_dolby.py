@@ -342,26 +342,102 @@ def get_wbi_keys(session: requests.Session):
     return img_key, sub_key
 
 
+def _fast_bili_api(path: str, sessdata: str = "") -> dict:
+    """裸 socket HTTPS 请求 —— 绕过 urllib3/requests 的代理探测开销。
+       本机 requests 库有链路问题（24s），裸 socket 100ms。仅用于 B站 API。"""
+    import socket, ssl, json as _json
+
+    host = "api.bilibili.com"
+    port = 443
+    timeout = 5
+
+    # DNS + TCP
+    addrs = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    ip = addrs[0][4][0]
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    sock.connect((ip, port))
+
+    # TLS
+    ctx = ssl.create_default_context()
+    tls = ctx.wrap_socket(sock, server_hostname=host)
+
+    # HTTP GET
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        f"User-Agent: {UA}\r\n"
+        f"Referer: {REFERER}\r\n"
+        "Accept: application/json\r\n"
+        + (f"Cookie: SESSDATA={sessdata}\r\n" if sessdata else "") +
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode()
+    tls.sendall(req)
+
+    # 读响应
+    data = b""
+    while True:
+        try:
+            chunk = tls.recv(8192)
+            if not chunk:
+                break
+            data += chunk
+        except Exception:
+            break
+    tls.close()
+
+    # 解析 body（支持 chunked transfer-encoding）
+    header_end = data.find(b"\r\n\r\n")
+    if header_end == -1:
+        raise RuntimeError("B站 API 响应格式异常")
+
+    headers_text = data[:header_end].decode("utf-8", errors="replace")
+    body = data[header_end + 4:]
+
+    if not body:
+        raise RuntimeError("B站 API 无响应")
+
+    if "chunked" in headers_text.lower():
+        # decode chunked encoding: <hex-size>\r\n<data>\r\n ... 0\r\n\r\n
+        decoded = b""
+        pos = 0
+        while pos < len(body):
+            line_end = body.find(b"\r\n", pos)
+            if line_end == -1:
+                break
+            chunk_size = int(body[pos:line_end], 16)
+            if chunk_size == 0:
+                break
+            pos = line_end + 2
+            decoded += body[pos:pos + chunk_size]
+            pos += chunk_size + 2  # skip \r\n after data
+        body = decoded
+
+    result = _json.loads(body)
+    if sessdata and result.get("code") != 0:
+        raise RuntimeError(f"B站 API 返回错误: code={result.get('code')}")
+    return result
+
+
 def init_bili_session(sessdata: str) -> tuple:
     """初始化 B 站会话：单次 nav API 完成 SESSDATA 验证 + WBI 签名密钥获取。
        validate_sessdata() + get_wbi_keys() 两次 nav 调用合并为一次，省一半网络时间。"""
-    session = requests.Session()
-    session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
-
-    resp = session.get(
-        "https://api.bilibili.com/x/web-interface/nav",
-        headers=COMMON_HEADERS,
-        timeout=(3, 5),
-    )
-    resp.raise_for_status()
-    j = resp.json()
+    # 裸 socket 直连 B站，绕过本机 requests 库的代理探测开销（24s → 0.1s）
+    j = _fast_bili_api("/x/web-interface/nav", sessdata)
 
     if j.get("code") != 0:
         raise RuntimeError(f"SESSDATA 过期或无效 (code={j.get('code')}): {j.get('message', 'unknown')}")
 
+    # 提取 WBI 签名密钥
     d = j["data"]["wbi_img"]
     img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
     sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
+
+    # 创建 requests Session 供后续 B站 API 调用（有 cookie，复用连接快）
+    session = requests.Session()
+    session.trust_env = False  # B站直连，不走代理
+    session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
 
     return session, img_key, sub_key
 
@@ -445,7 +521,7 @@ def resolve_ss(session: requests.Session, ss_id: int) -> tuple[str, int, str]:
     if not episodes:
         raise RuntimeError("该合集下没有剧集")
     first_ep = episodes[0]
-    return first_ep["bvid"], int(first_ep["cid"]), f"{season_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or f'第{first_ep.get(\"title\",\"?\")}集'}"
+    return first_ep["bvid"], int(first_ep["cid"]), f"{season_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or '第' + str(first_ep.get('title', '?')) + '集'}"
 
 def resolve_md(session: requests.Session, md_id: int) -> tuple[str, int, str]:
     """通过 MD(媒体详情页) ID 获取第一个 EP 的 bvid, cid, title。
@@ -466,7 +542,7 @@ def resolve_md(session: requests.Session, md_id: int) -> tuple[str, int, str]:
     if not episodes:
         raise RuntimeError("该媒体页下没有剧集")
     first_ep = episodes[0]
-    return first_ep["bvid"], int(first_ep["cid"]), f"{media_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or f'第{first_ep.get(\"title\",\"?\")}集'}"
+    return first_ep["bvid"], int(first_ep["cid"]), f"{media_title} - {first_ep.get('long_title') or first_ep.get('share_copy','') or '第' + str(first_ep.get('title', '?')) + '集'}"
 
 def get_cid(session: requests.Session, bvid: str):
     resp = session.get(
