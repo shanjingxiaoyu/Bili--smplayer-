@@ -342,7 +342,42 @@ def get_wbi_keys(session: requests.Session):
     return img_key, sub_key
 
 
-def _fast_bili_api(path: str, sessdata: str = "") -> dict:
+class _FastBiliSession:
+    """山寨 requests.Session —— 绕过 urllib3 代理探测，裸 socket 直连 B站。
+       提供 .get() 和 .cookies 接口，与 requests.Session 完全兼容。"""
+    def __init__(self):
+        self._cookies: dict[str, str] = {}
+
+    def get(self, url: str, params: dict = None, headers: dict = None, timeout=None):
+        """模拟 requests.Session.get()，返回有 .json() 和 .raise_for_status() 的对象。"""
+        from urllib.parse import urlencode
+        path = url.split(".com", 1)[1] if ".com" in url else url
+        if params:
+            path += "?" + urlencode(params)
+        return _FastResponse(_fast_bili_api(path, self._cookies.get("SESSDATA", ""), headers or {}))
+
+    @property
+    def cookies(self):
+        return self
+
+    def set(self, key, value, domain=None):
+        self._cookies[key] = value
+
+
+class _FastResponse:
+    """山寨 requests.Response —— 提供 .json() 和 .raise_for_status()。"""
+    def __init__(self, data: dict):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+    def raise_for_status(self):
+        if self._data.get("code", 0) != 0:
+            raise RuntimeError(f"API 错误: code={self._data.get('code')} msg={self._data.get('message', '')}")
+
+
+def _fast_bili_api(path: str, sessdata: str = "", extra_headers: dict = None) -> dict:
     """裸 socket HTTPS 请求 —— 绕过 urllib3/requests 的代理探测开销。
        本机 requests 库有链路问题（24s），裸 socket 100ms。仅用于 B站 API。"""
     import socket, ssl, json as _json
@@ -363,11 +398,15 @@ def _fast_bili_api(path: str, sessdata: str = "") -> dict:
     tls = ctx.wrap_socket(sock, server_hostname=host)
 
     # HTTP GET
+    extra = ""
+    if extra_headers:
+        for k, v in extra_headers.items():
+            extra += f"{k}: {v}\r\n"
     req = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         f"User-Agent: {UA}\r\n"
-        f"Referer: {REFERER}\r\n"
+        + extra +
         "Accept: application/json\r\n"
         + (f"Cookie: SESSDATA={sessdata}\r\n" if sessdata else "") +
         "Connection: close\r\n"
@@ -434,9 +473,8 @@ def init_bili_session(sessdata: str) -> tuple:
     img_key = d["img_url"].rsplit("/", 1)[-1].split(".")[0]
     sub_key = d["sub_url"].rsplit("/", 1)[-1].split(".")[0]
 
-    # 创建 requests Session 供后续 B站 API 调用（有 cookie，复用连接快）
-    session = requests.Session()
-    session.trust_env = False  # B站直连，不走代理
+    # 创建快速 Session（裸 socket，绕过本机 requests 库的链路问题）
+    session = _FastBiliSession()
     session.cookies.set("SESSDATA", sessdata, domain=".bilibili.com")
 
     return session, img_key, sub_key
