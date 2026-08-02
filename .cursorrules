@@ -1,0 +1,94 @@
+# BiliYTPlayer — Cursor AI 全局行为准则
+
+## 1. 核心架构认知
+本项目是一个基于 Python 的链接嗅探与真实流地址提取器。
+视频和音频的实际解码、渲染、色彩映射（Tone-mapping）以及硬件加速等核心播放任务，**全部交由内置的 `mpv` (位于 `mpv-portable/mpv.exe`) 负责**。
+
+### 架构分层
+- **`bili_yt_player.pyw`** — GUI 入口（tkinter），剪贴板监听线程 + 工作线程（生产者-消费者架构）
+- **`bili_clipboard_dolby.py`** — 后端核心：B站 API 鉴权 / WBI 签名 / DASH 流提取 / mpv 启动参数构造
+- **`mpv-portable/mpv.exe`** — 播放器，所有画面渲染、音频输出、色彩映射在此完成
+- **`mpv-portable/yt-dlp.exe`** — YouTube URL 解析，由 mpv 的 `ytdl_hook` 内置脚本调用
+- **`mpv-portable/portable_config/mpv.conf`** — mpv 渲染 / 同步 / 缓冲 / HDR 映射配置
+- **`mpv-portable/portable_config/input.conf`** — mpv 快捷键配置
+
+## 2. 播放器配置与控制原则（非常重要）
+*   **禁止在 Python 中造轮子**：当用户提出与"画面显示"、"色彩空间"、"HDR映射"、"播放快捷键"、"音量调整"等相关的需求时，**绝不要**尝试在 `bili_clipboard_dolby.py` 中编写逻辑或引入新的 Python UI/控制库。
+*   **优先修改 mpv 配置文件**：
+    *   **画面与渲染参数**：修改 `mpv-portable/portable_config/mpv.conf`。例如：HDR/SDR 的色调映射 (`tone-mapping`)、渲染器选择 (`vo=gpu-next`)、硬件解码 (`hwdec`)、视频同步模式 (`video-sync`)。
+    *   **快捷键与交互**：修改 `mpv-portable/portable_config/input.conf`。例如：自定义按键来调节亮度 (`brightness`)、音量、对比度等。
+*   **Python 的唯一职责**：如果必须在启动时动态传递参数给 mpv，只能修改 `bili_clipboard_dolby.py` 中的 `launch_player` 函数，通过 `cmd` 列表传递 CLI 参数（例如 `--brightness=15`）。命令行参数会覆盖 mpv.conf 中的同名选项。
+
+## 3. 网络请求与并发原则
+*   **剪贴板监听线程必须非阻塞**：监听线程只做剪贴板读取 + 正则匹配，检测到新链接入队 (`queue.Queue`)，不做任何网络请求。网络请求由独立的 Worker 线程消费。
+*   **B站 API 请求**：当前使用裸 socket HTTPS 直连以避免 `requests` 库的代理探测延迟。如需迁移到 `requests`，必须配置 `trust_env=False` 且不传 proxies 字典，否则 Windows 下会有 20s+ 延迟。
+*   **YouTube 代理**：mpv 不会自动读取环境变量代理，必须显式传 `--http-proxy`（给 mpv 内部 ffmpeg 拉 CDN 流）和 `--ytdl-raw-options=...,proxy=`（给 yt-dlp 解析 URL）。代理检测由 `_resolve_proxy_url` 函数负责，支持 http 代理、socks5→http 端口探测、PAC 脚本识别。
+*   **tkinter 线程安全**：所有后台线程的 UI 更新必须通过 `root.after(0, callback)` 调度到主线程，禁止直接操作控件。
+
+## 4. 动态多屏 HDR/SDR 映射指南
+在 `mpv.conf` 中配置色调映射时，可利用 `profile-cond` 实现基于视频源的自动切换。以下为标准范式参考：
+
+```ini
+# 基础渲染设置（全局）
+vo=gpu-next
+gpu-context=d3d11
+gpu-api=d3d11
+hwdec=auto-safe
+hdr-compute-peak=yes
+
+# ── HDR 源（BT.2020 + PQ 传递函数 = HDR10）─────────────────────────────────
+[HDR10]
+profile-cond=get("video-params/primaries") == "bt.2020" and get("video-params/gamma") == "pq"
+profile-restore=copy
+target-colorspace-hint=yes
+target-peak=800
+tone-mapping=spline
+
+# ── HLG 源（BT.2020 + HLG 传递函数 = HLG HDR）──────────────────────────────
+[HLG]
+profile-cond=get("video-params/primaries") == "bt.2020" and get("video-params/gamma") == "hlg"
+profile-restore=copy
+target-colorspace-hint=yes
+target-peak=1000
+tone-mapping=bt.2390
+
+# ── SDR 源（BT.709，绝大多数常规视频）────────────────────────────────────────
+[SDR]
+profile-cond=get("video-params/primaries") == "bt.709"
+profile-restore=copy
+target-colorspace-hint=no
+target-peak=200
+```
+
+### profile-cond 语法说明
+* 使用 `get("property/path")` 读取 mpv 属性，路径用 `/` 分隔。
+* `video-params/primaries` 取值：`bt.709`（SDR）、`bt.2020`（HDR）、`display-p3`（Apple）。
+* `video-params/gamma` 取值：`pq`（HDR10）、`hlg`（HLG）、`bt.1886`（SDR）。
+* `profile-restore=copy` 确保切换 profile 时恢复之前的值，避免参数残留。
+
+### target-peak 取值参考（nits）
+`target-peak` 表示目标显示设备的峰值亮度。**设为显示器 HDR 标称峰值的 80% 左右最稳妥**——厂商标称多为 3%-10% 小窗口峰值，全屏亮度达不到（OLED 全屏仅约 250-300 nits）。
+
+| 屏幕类型 | 典型 HDR 峰值 | 建议 target-peak |
+|---------|--------------|-----------------|
+| WOLED 显示器（LG / 华硕 / 海盗船） | 800-1300 | 800-1000 |
+| QD-OLED 显示器（三星 / 外星人 / MSI） | 1000-1500 | 800-1200 |
+| OLED 电视（中端，LG B/C 系列） | 700-1000 | 600-800 |
+| OLED 电视（高端 QD-OLED，LG G4 / 三星 S95D） | 1500-2000 | 1200-1600 |
+| Mini-LED 显示器（中端，1000-1400 级） | 1000-1400 | 800-1100 |
+| Mini-LED 显示器（高端，三星 Neo G8 / 小米 G Pro 2000 级） | 1600-2000 | 1200-1600 |
+| Mini-LED 电视（普及型，2200 级） | 2000-2400 | 1600-1800 |
+| Mini-LED 电视（高端，3000 级，海信/长虹/TCL 高端线） | 3000 | 2000-2400 |
+| Mini-LED 电视（旗舰，5000 级，TCL Q9M Pro 等） | 5000 | 3000-4000 |
+| 未知 / 无法检测 | — | 800（保守默认） |
+
+要点：
+* 配 `hdr-compute-peak=yes`（计算视频源场景峰值）使用，两者互补不冲突。
+* `target-colorspace-hint=yes` 时 mpv 优先读取显示器 EDID 自动判断能力，手动 target-peak 作为兜底。
+* Windows 未开启 HDR 时输出走 SDR，target-peak 设再高也无意义；应同时开启 Windows HDR 开关。
+* 调低（欠曝）比调高（过曝丢失高光细节）更安全，拿不准就往低档取。
+
+## 5. 打包与分发
+* 使用 PyInstaller 打包，spec 文件为 `bili_yt_player.spec`，输出 `BiliYTPlayer.exe`。
+* `mpv-portable/` 目录必须与 `BiliYTPlayer.exe` 同级放置，代码通过 `_exe_dir / "mpv-portable"` 定位。
+* 打包命令：`.venv/Scripts/python.exe -m PyInstaller --noconfirm bili_yt_player.spec`
